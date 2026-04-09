@@ -50,6 +50,29 @@ function appendToolCallAndResult(sm: ReturnType<typeof SessionManager.inMemory>)
   } as any);
 }
 
+function appendExecToolCallAndLargeResult(sm: ReturnType<typeof SessionManager.inMemory>) {
+  const appendMessage = sm.appendMessage.bind(sm) as unknown as (message: AgentMessage) => void;
+  appendMessage({
+    role: "assistant",
+    content: [{ type: "toolCall", id: "call_exec", name: "exec", arguments: {} }],
+  } as AgentMessage);
+
+  appendMessage({
+    role: "toolResult",
+    toolCallId: "call_exec",
+    toolName: "exec",
+    isError: false,
+    content: [{ type: "text", text: `line 1\n${"x".repeat(8_000)}\nline tail` }],
+    details: {
+      status: "completed",
+      exitCode: 0,
+      durationMs: 1_234,
+      aggregated: `line 1\n${"x".repeat(8_000)}\nline tail`,
+    },
+    // oxlint-disable-next-line typescript/no-explicit-any
+  } as any);
+}
+
 function getPersistedToolResult(sm: ReturnType<typeof SessionManager.inMemory>) {
   const messages = sm
     .getEntries()
@@ -129,6 +152,23 @@ describe("tool_result_persist hook", () => {
     expect(toolResult.role).toBe("toolResult");
     expect(toolResult.toolCallId).toBe("call_1");
     expect(Array.isArray(toolResult.content)).toBe(true);
+  });
+
+  it("summarizes oversized exec output before persisting it to the transcript", () => {
+    const sm = guardSessionManager(SessionManager.inMemory(), {
+      agentId: "main",
+      sessionKey: "main",
+    });
+
+    appendExecToolCallAndLargeResult(sm);
+    const toolResult = getPersistedToolResult(sm);
+    expect(toolResult).toBeTruthy();
+
+    const text = toolResult.content.find((block: { type?: string }) => block.type === "text")?.text;
+    expect(text).toContain("[Exec output summarized for persisted transcript]");
+    expect(text).toContain("Status: completed (exit 0), 1.2s");
+    expect(text).toContain("line tail");
+    expect(text).toContain("omitted from persisted transcript");
   });
 });
 

@@ -5,6 +5,7 @@ import {
   type InputProvenance,
 } from "../sessions/input-provenance.js";
 import { installSessionToolResultGuard } from "./session-tool-result-guard.js";
+import { summarizeToolResultForPersistence } from "./tool-result-persistence-summary.js";
 
 export type GuardedSessionManager = SessionManager & {
   /** Flush any synthetic tool results for pending tool calls. Idempotent. */
@@ -41,26 +42,33 @@ export function guardSessionManager(
       }
     : undefined;
 
-  const transform = hookRunner?.hasHooks("tool_result_persist")
-    ? // oxlint-disable-next-line typescript/no-explicit-any
-      (message: any, meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean }) => {
-        const out = hookRunner.runToolResultPersist(
-          {
-            toolName: meta.toolName,
-            toolCallId: meta.toolCallId,
-            message,
-            isSynthetic: meta.isSynthetic,
-          },
-          {
-            agentId: opts?.agentId,
-            sessionKey: opts?.sessionKey,
-            toolName: meta.toolName,
-            toolCallId: meta.toolCallId,
-          },
-        );
-        return out?.message ?? message;
-      }
-    : undefined;
+  // Keep the live tool result intact for the current run, but persist a compact
+  // transcript-friendly summary for especially noisy tool outputs.
+  const transform = (
+    message: import("@mariozechner/pi-agent-core").AgentMessage,
+    meta: { toolCallId?: string; toolName?: string; isSynthetic?: boolean },
+  ) => {
+    let nextMessage = summarizeToolResultForPersistence(message, meta);
+    if (!hookRunner?.hasHooks("tool_result_persist")) {
+      return nextMessage;
+    }
+    const out = hookRunner.runToolResultPersist(
+      {
+        toolName: meta.toolName,
+        toolCallId: meta.toolCallId,
+        message: nextMessage,
+        isSynthetic: meta.isSynthetic,
+      },
+      {
+        agentId: opts?.agentId,
+        sessionKey: opts?.sessionKey,
+        toolName: meta.toolName,
+        toolCallId: meta.toolCallId,
+      },
+    );
+    nextMessage = out?.message ?? nextMessage;
+    return nextMessage;
+  };
 
   const guard = installSessionToolResultGuard(sessionManager, {
     sessionKey: opts?.sessionKey,
