@@ -125,6 +125,68 @@ const CHANNEL_AGNOSTIC_SESSION_SCOPES = new Set([
   "topic",
 ]);
 const CHANNEL_SCOPED_SESSION_SHAPES = new Set(["direct", "dm", "group", "channel"]);
+const SIMPLE_CHAT_MAX_CHARS = 180;
+const SIMPLE_CHAT_TOOL_INTENT_RE =
+  /(文件|目录|代码|仓库|项目|读取|打开|修改|编辑|写入|创建|删除|运行|执行|命令|终端|日志|报错|错误|测试|构建|编译|搜索|查询|联网|浏览器|网页|网站|链接|飞书|会话|工具|记忆|数据库|配置|重启|检查|排查|修复|优化|查一下|\b(?:http|https|url|repo|git|log|shell|bash|terminal|file|code|search|browser|session|agent|tool|memory|mempalace|gateway|openclaw|config|debug|fix|test|build)\b)/iu;
+
+function hasRecentToolActivity(messages: unknown[], maxMessages = 12): boolean {
+  const recent = messages.slice(-maxMessages);
+  return recent.some((message) => {
+    if (!message || typeof message !== "object") {
+      return false;
+    }
+    const record = message as Record<string, unknown>;
+    const role = typeof record.role === "string" ? record.role.toLowerCase() : "";
+    if (role === "tool" || role === "toolresult" || role === "tool_result") {
+      return true;
+    }
+    if (typeof record.toolCallId === "string" || typeof record.tool_call_id === "string") {
+      return true;
+    }
+    const content = record.content;
+    if (typeof content === "string" && /<minimax:tool_call>|<invoke\s+name=/i.test(content)) {
+      return true;
+    }
+    if (!Array.isArray(content)) {
+      return false;
+    }
+    return content.some((block) => {
+      if (!block || typeof block !== "object") {
+        return false;
+      }
+      const blockRecord = block as Record<string, unknown>;
+      const type = typeof blockRecord.type === "string" ? blockRecord.type.toLowerCase() : "";
+      if (type === "toolcall" || type === "tool_call" || type === "tooluse") {
+        return true;
+      }
+      const text = typeof blockRecord.text === "string" ? blockRecord.text : "";
+      return /<minimax:tool_call>|<invoke\s+name=/i.test(text);
+    });
+  });
+}
+
+export function resolveAutoChatToolsAllowForMessage(params: {
+  message: string;
+  attachmentCount?: number;
+  deliver?: boolean;
+  hasSystemProvenance?: boolean;
+  hasRecentToolActivity?: boolean;
+}): string[] | undefined {
+  if (params.deliver || params.hasSystemProvenance || (params.attachmentCount ?? 0) > 0) {
+    return undefined;
+  }
+  const raw = params.message.trim();
+  if (!raw || raw.startsWith("/") || raw.length > SIMPLE_CHAT_MAX_CHARS) {
+    return undefined;
+  }
+  if (/```|`[^`]+`/.test(raw)) {
+    return undefined;
+  }
+  if (params.hasRecentToolActivity || SIMPLE_CHAT_TOOL_INTENT_RE.test(raw)) {
+    return undefined;
+  }
+  return [];
+}
 
 type ChatSendDeliveryEntry = {
   deliveryContext?: {
@@ -1453,7 +1515,11 @@ export const chatHandlers: GatewayRequestHandlers = {
     // marker injection on the model's image capability. This prevents opaque
     // media:// markers from leaking into prompts for text-only model runs.
     const rawSessionKey = p.sessionKey;
-    const { cfg, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
+    const { cfg, storePath, entry, canonicalKey: sessionKey } = loadSessionEntry(rawSessionKey);
+    const recentMessages =
+      entry?.sessionId && storePath
+        ? readSessionMessages(entry.sessionId, storePath, entry.sessionFile)
+        : [];
 
     let parsedMessage = inboundMessage;
     let parsedImages: ChatImageContent[] = [];
@@ -1584,6 +1650,14 @@ export const chatHandlers: GatewayRequestHandlers = {
       });
 
       const trimmedMessage = parsedMessage.trim();
+      const autoToolsAllow = resolveAutoChatToolsAllowForMessage({
+        message: parsedMessage,
+        attachmentCount: normalizedAttachments.length,
+        deliver: p.deliver,
+        hasSystemProvenance: Boolean(systemInputProvenance || systemProvenanceReceipt),
+        hasRecentToolActivity: hasRecentToolActivity(recentMessages),
+      });
+      const isAutoLightweightChat = Array.isArray(autoToolsAllow) && autoToolsAllow.length === 0;
       const injectThinking = Boolean(
         p.thinking && trimmedMessage && !trimmedMessage.startsWith("/"),
       );
@@ -1737,10 +1811,24 @@ export const chatHandlers: GatewayRequestHandlers = {
         replyOptions: {
           runId: clientRunId,
           abortSignal: abortController.signal,
+          toolsAllow: autoToolsAllow,
+          disableTools: isAutoLightweightChat,
+          bootstrapContextMode: isAutoLightweightChat ? "lightweight" : undefined,
           images: parsedImages.length > 0 ? parsedImages : undefined,
           imageOrder: parsedImageOrder.length > 0 ? parsedImageOrder : undefined,
           onAgentRunStart: (runId) => {
             agentRunStarted = true;
+            const activeChatRun = context.chatAbortControllers.get(clientRunId);
+            if (activeChatRun?.agentRunId && activeChatRun.agentRunId !== runId) {
+              context.removeChatRun(activeChatRun.agentRunId, clientRunId, sessionKey);
+            }
+            context.addChatRun(runId, {
+              sessionKey,
+              clientRunId,
+            });
+            if (activeChatRun) {
+              activeChatRun.agentRunId = runId;
+            }
             void emitUserTranscriptUpdate();
             const connId = typeof client?.connId === "string" ? client.connId : undefined;
             const wantsToolEvents = hasGatewayClientCap(

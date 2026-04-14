@@ -351,6 +351,15 @@ describe("sanitizeToolCallInputs", () => {
       options: { allowedToolNames: ["read"] },
       expectedIds: ["call_ok"],
     },
+    {
+      name: "drops read tool calls that point at obvious directories",
+      content: [
+        { type: "toolUse", id: "call_dir", name: "read", input: { path: "." } },
+        { type: "toolCall", id: "call_file", name: "read", arguments: { path: "README.md" } },
+      ],
+      options: undefined,
+      expectedIds: ["call_file"],
+    },
   ])("$name", ({ content, options, expectedIds }) => {
     const toolCalls = sanitizeAssistantToolCalls(content, options);
     const ids = toolCalls
@@ -378,6 +387,28 @@ describe("sanitizeToolCallInputs", () => {
       ? assistant.content.map((block) => (block as { type?: unknown }).type)
       : [];
     expect(types).toEqual(["text", "toolUse"]);
+  });
+
+  it("drops directory-like read tool calls while preserving surrounding text", () => {
+    const input = castAgentMessages([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "before" },
+          { type: "toolUse", id: "call_drop", name: "read", input: { path: "." } },
+          { type: "toolCall", id: "call_keep", name: "exec", arguments: { command: "pwd" } },
+        ],
+      },
+    ]);
+
+    const out = sanitizeToolCallInputs(input);
+    const assistant = out[0] as Extract<AgentMessage, { role: "assistant" }>;
+    const types = Array.isArray(assistant.content)
+      ? assistant.content.map((block) => (block as { type?: unknown }).type)
+      : [];
+    expect(types).toEqual(["text", "toolCall"]);
+    const toolCalls = getAssistantToolCallBlocks(out);
+    expect(toolCalls.map((toolCall) => toolCall.id)).toEqual(["call_keep"]);
   });
 
   it.each([

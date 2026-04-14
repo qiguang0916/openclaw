@@ -111,6 +111,31 @@ function appendUniqueSuffix(base: string, suffix: string): string {
   return base + suffix;
 }
 
+function collapseRepeatedLeadingPrefix(text: string, prefix: string): string {
+  if (!text || !prefix) {
+    return text;
+  }
+  if (!text.startsWith(prefix)) {
+    return text;
+  }
+
+  let remainder = text.slice(prefix.length);
+  let changed = false;
+  while (remainder) {
+    const normalizedRemainder = remainder.replace(/^\s+/, "");
+    if (!normalizedRemainder.startsWith(prefix)) {
+      break;
+    }
+    remainder = normalizedRemainder.slice(prefix.length);
+    changed = true;
+  }
+
+  if (!changed) {
+    return text;
+  }
+  return prefix + remainder;
+}
+
 function resolveMergedAssistantText(params: {
   previousText: string;
   nextText: string;
@@ -118,12 +143,20 @@ function resolveMergedAssistantText(params: {
 }) {
   const { previousText, nextText, nextDelta } = params;
   if (nextText && previousText) {
+    const dedupedNextText = collapseRepeatedLeadingPrefix(nextText, previousText);
+    if (dedupedNextText.startsWith(previousText)) {
+      return dedupedNextText;
+    }
     if (nextText.startsWith(previousText)) {
       return nextText;
     }
     if (previousText.startsWith(nextText) && !nextDelta) {
       return previousText;
     }
+    // nextText is completely disjoint from previousText — the buffer belongs to a previous
+    // assistant message (e.g. before a tool call). Trust nextText as the authoritative full
+    // text of the current message rather than appending nextDelta to a stale buffer.
+    return nextText;
   }
   if (nextDelta) {
     return appendUniqueSuffix(previousText, nextDelta);
@@ -268,6 +301,16 @@ const TOOL_EVENT_RECIPIENT_FINAL_GRACE_MS = 30 * 1000;
  * do not finalize a run before fallback or retry reuses the same runId.
  */
 const AGENT_LIFECYCLE_ERROR_RETRY_GRACE_MS = 15_000;
+const CHAT_PROGRESS_HEARTBEAT_MS = 5_000;
+
+type ChatProgressHeartbeatState = {
+  sessionKey: string;
+  clientRunId: string;
+  sourceRunId: string;
+  summary: string;
+  activeToolName?: string;
+  timer: NodeJS.Timeout;
+};
 
 export function createSessionEventSubscriberRegistry(): SessionEventSubscriberRegistry {
   const connIds = new Set<string>();
@@ -472,6 +515,87 @@ export function createAgentEventHandler({
   isChatSendRunActive = () => false,
 }: AgentEventHandlerOptions) {
   const pendingTerminalLifecycleErrors = new Map<string, NodeJS.Timeout>();
+  const chatProgressHeartbeatByRunId = new Map<string, ChatProgressHeartbeatState>();
+
+  const emitChatProgress = (
+    sessionKey: string,
+    clientRunId: string,
+    sourceRunId: string,
+    phase: "started" | "streaming" | "tool" | "completed" | "error",
+    summary: string,
+    extra?: { activeToolName?: string; ts?: number },
+  ) => {
+    const payload = {
+      runId: clientRunId,
+      sourceRunId,
+      sessionKey,
+      phase,
+      summary,
+      ...(extra?.activeToolName ? { activeToolName: extra.activeToolName } : {}),
+      ts: extra?.ts ?? Date.now(),
+    };
+    broadcast("chat.progress", payload, { dropIfSlow: true });
+    nodeSendToSession(sessionKey, "chat.progress", payload);
+  };
+
+  const stopChatProgressHeartbeat = (runId: string) => {
+    const existing = chatProgressHeartbeatByRunId.get(runId);
+    if (!existing) {
+      return;
+    }
+    clearInterval(existing.timer);
+    chatProgressHeartbeatByRunId.delete(runId);
+  };
+
+  const startOrUpdateChatProgressHeartbeat = (params: {
+    sessionKey: string;
+    clientRunId: string;
+    sourceRunId: string;
+    phase: "started" | "streaming" | "tool";
+    summary: string;
+    activeToolName?: string;
+    ts?: number;
+  }) => {
+    stopChatProgressHeartbeat(params.clientRunId);
+    stopChatProgressHeartbeat(params.sourceRunId);
+    emitChatProgress(
+      params.sessionKey,
+      params.clientRunId,
+      params.sourceRunId,
+      params.phase,
+      params.summary,
+      { activeToolName: params.activeToolName, ts: params.ts },
+    );
+    const timer = setInterval(() => {
+      emitChatProgress(
+        params.sessionKey,
+        params.clientRunId,
+        params.sourceRunId,
+        params.phase,
+        `仍在执行：${params.summary}`,
+        { activeToolName: params.activeToolName },
+      );
+    }, CHAT_PROGRESS_HEARTBEAT_MS);
+    timer.unref?.();
+    chatProgressHeartbeatByRunId.set(params.sourceRunId, {
+      sessionKey: params.sessionKey,
+      clientRunId: params.clientRunId,
+      sourceRunId: params.sourceRunId,
+      summary: params.summary,
+      activeToolName: params.activeToolName,
+      timer,
+    });
+    if (params.clientRunId !== params.sourceRunId) {
+      chatProgressHeartbeatByRunId.set(params.clientRunId, {
+        sessionKey: params.sessionKey,
+        clientRunId: params.clientRunId,
+        sourceRunId: params.sourceRunId,
+        summary: params.summary,
+        activeToolName: params.activeToolName,
+        timer,
+      });
+    }
+  };
 
   const clearBufferedChatState = (clientRunId: string) => {
     chatRunState.buffers.delete(clientRunId);
@@ -568,6 +692,7 @@ export function createAgentEventHandler({
     }
 
     clearPendingTerminalLifecycleError(evt.runId);
+    stopChatProgressHeartbeat(evt.runId);
 
     const chatLink = chatRunState.registry.peek(evt.runId);
     const eventSessionKey =
@@ -626,6 +751,7 @@ export function createAgentEventHandler({
     clearAgentRunContext(evt.runId);
     agentRunSeq.delete(evt.runId);
     agentRunSeq.delete(clientRunId);
+    stopChatProgressHeartbeat(clientRunId);
 
     if (sessionKey) {
       void persistGatewaySessionLifecycleEvent({ sessionKey, event: evt }).catch(() => undefined);
@@ -637,6 +763,7 @@ export function createAgentEventHandler({
             sessionKey,
             phase: lifecyclePhase,
             runId: evt.runId,
+            ...(chatLink?.clientRunId ? { clientRunId: chatLink.clientRunId } : {}),
             ts: evt.ts,
             ...buildSessionEventSnapshot(sessionKey, evt),
           },
@@ -808,6 +935,7 @@ export function createAgentEventHandler({
       };
       broadcast("chat", payload);
       nodeSendToSession(sessionKey, "chat", payload);
+      emitChatProgress(sessionKey, clientRunId, sourceRunId, "completed", "已收到最终结果");
       return;
     }
     const payload = {
@@ -819,6 +947,7 @@ export function createAgentEventHandler({
     };
     broadcast("chat", payload);
     nodeSendToSession(sessionKey, "chat", payload);
+    emitChatProgress(sessionKey, clientRunId, sourceRunId, "error", "后台返回了错误");
   };
 
   const resolveToolVerboseLevel = (runId: string, sessionKey?: string) => {
@@ -899,6 +1028,15 @@ export function createAgentEventHandler({
       // render complete pre-tool text above tool cards (not truncated by delta throttle).
       if (toolPhase === "start" && isControlUiVisible && sessionKey && !isAborted) {
         flushBufferedChatDeltaIfNeeded(sessionKey, clientRunId, evt.runId, evt.seq);
+        startOrUpdateChatProgressHeartbeat({
+          sessionKey,
+          clientRunId,
+          sourceRunId: evt.runId,
+          phase: "tool",
+          summary: `工具执行中：${typeof evt.data?.name === "string" ? evt.data.name : "tool"}`,
+          activeToolName: typeof evt.data?.name === "string" ? evt.data.name : undefined,
+          ts: evt.ts,
+        });
       }
       // Always broadcast tool events to registered WS recipients with
       // tool-events capability, regardless of verboseLevel. The verbose
@@ -948,6 +1086,14 @@ export function createAgentEventHandler({
       }
       if (!isAborted && evt.stream === "assistant" && typeof evt.data?.text === "string") {
         emitChatDelta(sessionKey, clientRunId, evt.runId, evt.seq, evt.data.text, evt.data.delta);
+        startOrUpdateChatProgressHeartbeat({
+          sessionKey,
+          clientRunId,
+          sourceRunId: evt.runId,
+          phase: "streaming",
+          summary: "模型正在流式回复",
+          ts: evt.ts,
+        });
       }
     }
 
@@ -968,6 +1114,14 @@ export function createAgentEventHandler({
     }
 
     if (sessionKey && lifecyclePhase === "start") {
+      startOrUpdateChatProgressHeartbeat({
+        sessionKey,
+        clientRunId,
+        sourceRunId: evt.runId,
+        phase: "started",
+        summary: "后台会话已启动",
+        ts: evt.ts,
+      });
       void persistGatewaySessionLifecycleEvent({ sessionKey, event: evt }).catch(() => undefined);
       const sessionEventConnIds = sessionEventSubscribers.getAll();
       if (sessionEventConnIds.size > 0) {
@@ -977,6 +1131,7 @@ export function createAgentEventHandler({
             sessionKey,
             phase: lifecyclePhase,
             runId: evt.runId,
+            ...(chatLink?.clientRunId ? { clientRunId: chatLink.clientRunId } : {}),
             ts: evt.ts,
             ...buildSessionEventSnapshot(sessionKey, evt),
           },

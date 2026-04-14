@@ -16,7 +16,52 @@ export type SessionsState = {
   sessionsFilterLimit: string;
   sessionsIncludeGlobal: boolean;
   sessionsIncludeUnknown: boolean;
+  sessionKey?: string;
+  chatRunId?: string | null;
+  chatStream?: string | null;
+  chatStreamStartedAt?: number | null;
+  chatRunStartedAt?: number;
+  chatSending?: boolean;
+  chatStaleRecoveryInFlight?: boolean;
 };
+
+function clearStaleTerminalChatState(state: SessionsState, result: SessionsListResult | undefined) {
+  if (!result || !state.chatRunId || !state.sessionKey) {
+    return;
+  }
+  const currentSession = result.sessions.find((entry) => entry.key === state.sessionKey);
+  if (!currentSession?.status) {
+    return;
+  }
+  if (currentSession.status === "running") {
+    return;
+  }
+  // Guard: chatStream being a string (including "") signals that streaming is actively in
+  // progress. The session status can transiently report non-running during tool-execution
+  // phases within a multi-turn agentic run, which would cause a false-positive teardown that
+  // makes streamed text flicker and disappear. Defer to the authoritative chat
+  // final/aborted/error events for normal teardown; the stale-run watchdog covers the
+  // missed-final-event edge case after its own timeout.
+  if ("chatStream" in state && typeof state.chatStream === "string") {
+    return;
+  }
+  state.chatRunId = null;
+  if ("chatStream" in state) {
+    state.chatStream = null;
+  }
+  if ("chatStreamStartedAt" in state) {
+    state.chatStreamStartedAt = null;
+  }
+  if ("chatRunStartedAt" in state) {
+    state.chatRunStartedAt = 0;
+  }
+  if ("chatSending" in state) {
+    state.chatSending = false;
+  }
+  if ("chatStaleRecoveryInFlight" in state) {
+    state.chatStaleRecoveryInFlight = false;
+  }
+}
 
 export async function subscribeSessions(state: SessionsState) {
   if (!state.client || !state.connected) {
@@ -64,6 +109,7 @@ export async function loadSessions(
     const res = await state.client.request<SessionsListResult | undefined>("sessions.list", params);
     if (res) {
       state.sessionsResult = res;
+      clearStaleTerminalChatState(state, res);
     }
   } catch (err) {
     if (isMissingOperatorReadScopeError(err)) {

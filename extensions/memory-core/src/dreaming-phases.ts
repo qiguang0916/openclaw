@@ -1191,6 +1191,7 @@ async function runPhaseIfTriggered(params: {
   cfg?: OpenClawConfig;
   logger: Logger;
   subagent?: Parameters<typeof generateAndAppendDreamNarrative>[0]["subagent"];
+  nowMs?: number;
   phase: "light" | "rem";
   eventText: string;
   config:
@@ -1234,6 +1235,7 @@ async function runPhaseIfTriggered(params: {
           },
           logger: params.logger,
           subagent: params.subagent,
+          nowMs: params.nowMs,
         });
       } else {
         await runRemDreaming({
@@ -1244,6 +1246,7 @@ async function runPhaseIfTriggered(params: {
           },
           logger: params.logger,
           subagent: params.subagent,
+          nowMs: params.nowMs,
         });
       }
     } catch (err) {
@@ -1316,6 +1319,7 @@ export function registerMemoryDreamingPhases(api: OpenClawPluginApi): void {
   );
 
   api.on("before_agent_reply", async (event, ctx) => {
+    const nowMs = Date.now();
     const pluginConfig = resolveMemoryCorePluginConfig(api.config) ?? api.pluginConfig;
     const light = resolveMemoryLightDreamingConfig({ pluginConfig, cfg: api.config });
     const lightResult = await runPhaseIfTriggered({
@@ -1325,6 +1329,7 @@ export function registerMemoryDreamingPhases(api: OpenClawPluginApi): void {
       cfg: api.config,
       logger: api.logger,
       subagent: light.enabled ? api.runtime?.subagent : undefined,
+      nowMs,
       phase: "light",
       eventText: LIGHT_SLEEP_EVENT_TEXT,
       config: light,
@@ -1340,6 +1345,7 @@ export function registerMemoryDreamingPhases(api: OpenClawPluginApi): void {
       cfg: api.config,
       logger: api.logger,
       subagent: rem.enabled ? api.runtime?.subagent : undefined,
+      nowMs,
       phase: "rem",
       eventText: REM_SLEEP_EVENT_TEXT,
       config: rem,

@@ -1,6 +1,10 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
+  initializeAgentMempalaceSpace,
+  shouldUseMempalaceSessionMemory,
+} from "../../extensions/mempalace-memory/api.js";
+import {
   resolveAgentDir,
   resolveAgentWorkspaceDir,
   resolveDefaultAgentId,
@@ -128,6 +132,15 @@ export async function agentsAddCommand(
       bindingParse.bindings.length > 0
         ? applyAgentBindings(nextConfig, bindingParse.bindings)
         : { config: nextConfig, added: [], updated: [], skipped: [], conflicts: [] };
+
+    if (shouldUseMempalaceSessionMemory(bindingResult.config)) {
+      await initializeAgentMempalaceSpace({
+        cfg: bindingResult.config,
+        agentId,
+        displayName: nameInput,
+        workspaceDir,
+      });
+    }
 
     await replaceConfigFile({
       nextConfig: bindingResult.config,
@@ -345,6 +358,15 @@ export async function agentsAddCommand(
           "Routing",
         );
       }
+    }
+
+    if (shouldUseMempalaceSessionMemory(nextConfig)) {
+      await initializeAgentMempalaceSpace({
+        cfg: nextConfig,
+        agentId,
+        displayName: agentName,
+        workspaceDir,
+      });
     }
 
     await replaceConfigFile({

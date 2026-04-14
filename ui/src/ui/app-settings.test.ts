@@ -36,6 +36,7 @@ type SettingsHost = {
     token: string;
     sessionKey: string;
     lastActiveSessionKey: string;
+    lastLeadChatSessionKey?: string;
     theme: ThemeName;
     themeMode: ThemeMode;
     chatFocusMode: boolean;
@@ -357,6 +358,34 @@ describe("applySettingsFromUrl", () => {
     expect(host.sessionKey).toBe("agent:test_new:main");
     expect(host.settings.sessionKey).toBe("agent:test_new:main");
     expect(host.settings.lastActiveSessionKey).toBe("agent:test_new:main");
+  });
+
+  it("maps stale chat main URLs to the Jarvis chat session", () => {
+    setTestWindowUrl("https://control.example/chat?session=agent%3Amain%3Amain");
+    const host = createHost("chat");
+    host.settings = {
+      ...host.settings,
+      sessionKey: "agent:test_old:main",
+      lastActiveSessionKey: "agent:test_old:main",
+    };
+    host.sessionKey = "agent:test_old:main";
+
+    applySettingsFromUrl(host);
+
+    expect(host.sessionKey).toBe("agent:openclaw-optimizer:main");
+    expect(host.settings.sessionKey).toBe("agent:openclaw-optimizer:main");
+    expect(host.settings.lastActiveSessionKey).toBe("agent:openclaw-optimizer:main");
+    expect(host.settings.lastLeadChatSessionKey).toBe("agent:openclaw-optimizer:main");
+  });
+
+  it("tracks explicit lead chat URLs as the last lead chat session", () => {
+    setTestWindowUrl("https://control.example/chat?session=agent%3Ady-chief%3Amain");
+    const host = createHost("chat");
+
+    applySettingsFromUrl(host);
+
+    expect(host.sessionKey).toBe("agent:dy-chief:main");
+    expect(host.settings.lastLeadChatSessionKey).toBe("agent:dy-chief:main");
   });
 
   it("does not reset the current gateway session when a different gateway is pending confirmation", () => {

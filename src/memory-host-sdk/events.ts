@@ -40,6 +40,7 @@ export type MemoryHostDreamCompletedEvent = {
   reportPath?: string;
   lineCount: number;
   storageMode: "inline" | "separate" | "both";
+  contentHash?: string;
 };
 
 export type MemoryHostEvent =

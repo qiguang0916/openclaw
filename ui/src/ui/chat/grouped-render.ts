@@ -90,15 +90,29 @@ function extractAudioClips(message: unknown): AudioClip[] {
   return clips;
 }
 
-export function renderReadingIndicatorGroup(assistant?: AssistantIdentity, basePath?: string) {
+export function renderReadingIndicatorGroup(
+  assistant?: AssistantIdentity,
+  basePath?: string,
+  activityLabel?: string | null,
+  progressLabel?: string | null,
+) {
   return html`
     <div class="chat-group assistant">
       ${renderAvatar("assistant", assistant, basePath)}
       <div class="chat-group-messages">
         <div class="chat-bubble chat-reading-indicator" aria-hidden="true">
-          <span class="chat-reading-indicator__dots">
-            <span></span><span></span><span></span>
-          </span>
+          <div class="chat-reading-indicator__row">
+            <span class="chat-reading-indicator__label">正在等待回复</span>
+            <span class="chat-reading-indicator__dots">
+              <span></span><span></span><span></span>
+            </span>
+          </div>
+          ${activityLabel
+            ? html`<div class="chat-reading-indicator__activity">${activityLabel}</div>`
+            : nothing}
+          ${progressLabel
+            ? html`<div class="chat-reading-indicator__progress">${progressLabel}</div>`
+            : nothing}
         </div>
       </div>
     </div>

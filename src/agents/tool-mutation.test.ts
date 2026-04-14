@@ -85,6 +85,20 @@ describe("tool mutation helpers", () => {
     expect(isLikelyMutatingToolName("sessions_send")).toBe(true);
     expect(isLikelyMutatingToolName("browser_actions")).toBe(true);
     expect(isLikelyMutatingToolName("message_slack")).toBe(true);
+    expect(isLikelyMutatingToolName("memory_update")).toBe(true);
     expect(isLikelyMutatingToolName("browser")).toBe(false);
+  });
+
+  it("treats memory CRUD/import tools as mutating and export/query tools as read-only", () => {
+    expect(isMutatingToolCall("memory_write", { content: "remember this" })).toBe(true);
+    expect(
+      isMutatingToolCall("memory_update", { path: "mempalace/private/drawer/v1/x/y.md" }),
+    ).toBe(true);
+    expect(
+      isMutatingToolCall("memory_delete", { path: "mempalace/private/drawer/v1/x/y.md" }),
+    ).toBe(true);
+    expect(isMutatingToolCall("memory_import", { inputPath: "memory-export.json" })).toBe(true);
+    expect(isMutatingToolCall("memory_export", { scope: "private" })).toBe(false);
+    expect(isLikelyMutatingToolName("memory_export")).toBe(false);
   });
 });

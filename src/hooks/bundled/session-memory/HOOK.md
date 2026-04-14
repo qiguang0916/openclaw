@@ -25,11 +25,11 @@ When you run `/new` or `/reset` to start a fresh session:
 1. **Finds the previous session** - Uses the pre-reset session entry to locate the correct transcript
 2. **Extracts conversation** - Reads the last N user/assistant messages from the session (default: 15, configurable)
 3. **Generates descriptive slug** - Uses LLM to create a meaningful filename slug based on conversation content
-4. **Saves to memory** - Creates a new file at `<workspace>/memory/YYYY-MM-DD-slug.md`
+4. **Saves to memory** - Writes to the active memory backend. With `mempalace-memory` active, this is stored in MemPalace; otherwise it falls back to `<workspace>/memory/YYYY-MM-DD-slug.md`
 
 ## Output Format
 
-Memory files are created with the following format:
+Session memory content is stored with the following payload:
 
 ```markdown
 # Session: 2026-01-16 14:30:00 UTC
@@ -39,9 +39,10 @@ Memory files are created with the following format:
 - **Source**: telegram
 ```
 
-## Filename Examples
+## Legacy Filename Examples
 
-The LLM generates descriptive slugs based on your conversation:
+When the hook falls back to workspace file memory instead of MemPalace, the LLM
+generates descriptive slugs based on your conversation:
 
 - `2026-01-16-vendor-pitch.md` - Discussion about vendor evaluation
 - `2026-01-16-api-design.md` - API architecture planning
@@ -84,6 +85,12 @@ The hook automatically:
 - Uses your workspace directory (`~/.openclaw/workspace` by default)
 - Uses your configured LLM for slug generation
 - Falls back to timestamp slugs if LLM is unavailable
+- Uses the active memory slot when available; with `mempalace-memory`, the session summary is filed into MemPalace first and only falls back to a workspace file if that write fails
+
+Primary path:
+
+- MemPalace is the preferred storage backend for this hook when `mempalace-memory` owns the active memory slot.
+- Workspace `memory/*.md` output is now a compatibility fallback, not the primary source of truth.
 
 ## Disabling
 

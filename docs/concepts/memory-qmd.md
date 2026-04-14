@@ -1,16 +1,18 @@
 ---
 title: "QMD Memory Engine"
-summary: "Local-first search sidecar with BM25, vectors, reranking, and query expansion"
+summary: "Optional local-first sidecar for the legacy file-backed memory lane"
 read_when:
-  - You want to set up QMD as your memory backend
+  - You want to set up QMD for the legacy `memory-core` lane
   - You want advanced memory features like reranking or extra indexed paths
 ---
 
 # QMD Memory Engine
 
-[QMD](https://github.com/tobi/qmd) is a local-first search sidecar that runs
-alongside OpenClaw. It combines BM25, vector search, and reranking in a single
-binary, and can index content beyond your workspace memory files.
+[QMD](https://github.com/tobi/qmd) is an optional local-first search sidecar
+for the legacy file-backed `memory-core` lane. It combines BM25, vector
+search, and reranking in a single binary, and can index content beyond
+workspace memory files. It is no longer the primary memory path in deployments
+where `mempalace-memory` owns `plugins.slots.memory`.
 
 ## What it adds over builtin
 
@@ -40,7 +42,7 @@ binary, and can index content beyond your workspace memory files.
 }
 ```
 
-OpenClaw creates a self-contained QMD home under
+For the legacy file-backed lane, OpenClaw creates a self-contained QMD home under
 `~/.openclaw/agents/<agentId>/qmd/` and manages the sidecar lifecycle
 automatically -- collections, updates, and embedding runs are handled for you.
 It prefers current QMD collection and MCP query shapes, but still falls back to

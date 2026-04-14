@@ -9,70 +9,70 @@ read_when:
 
 # Dreaming (experimental)
 
-Dreaming is the background memory consolidation system in `memory-core`.
-It helps OpenClaw move strong short-term signals into durable memory while
-keeping the process explainable and reviewable.
+Dreaming is the background memory consolidation system for the active memory
+plugin.
+
+Current deployment note:
+
+- **MemPalace-native dreaming** is now the practical primary path.
+- **Legacy `memory-core` dreaming** remains as a file-backed compatibility lane.
+
+Both paths keep the same broad phase ideas, but they write to different storage
+substrates.
 
 Dreaming is **opt-in** and disabled by default.
 
 ## What dreaming writes
 
-Dreaming keeps two kinds of output:
+MemPalace-native dreaming writes:
 
-- **Machine state** in `memory/.dreams/` (recall store, phase signals, ingestion checkpoints, locks).
-- **Human-readable output** in `DREAMS.md` (or existing `dreams.md`) and optional phase report files under `memory/dreaming/<phase>/YYYY-MM-DD.md`.
+- **recall and dreaming events** in `memory/.dreams/events.jsonl`
+- **light output** to MemPalace diary
+- **REM output** to MemPalace drawers
+- **deep output** to MemPalace KG facts
 
-Long-term promotion still writes only to `MEMORY.md`.
+Legacy file-backed `memory-core` dreaming keeps the older outputs:
+
+- machine state in `memory/.dreams/`
+- human-readable output in `DREAMS.md`
+- durable promotion into `MEMORY.md`
 
 ## Phase model
 
 Dreaming uses three cooperative phases:
 
-| Phase | Purpose                                   | Durable write     |
-| ----- | ----------------------------------------- | ----------------- |
-| Light | Sort and stage recent short-term material | No                |
-| Deep  | Score and promote durable candidates      | Yes (`MEMORY.md`) |
-| REM   | Reflect on themes and recurring ideas     | No                |
+| Phase | Purpose                                   | Primary MemPalace output |
+| ----- | ----------------------------------------- | ------------------------ |
+| Light | Sort and stage recent short-term material | Diary                    |
+| Deep  | Score and reinforce durable candidates    | KG facts                 |
+| REM   | Reflect on themes and recurring ideas     | Drawer synthesis         |
 
 These phases are internal implementation details, not separate user-configured
 "modes."
 
 ### Light phase
 
-Light phase ingests recent daily memory signals and recall traces, dedupes them,
-and stages candidate lines.
-
-- Reads from short-term recall state and recent daily memory files.
-- Writes a managed `## Light Sleep` block when storage includes inline output.
-- Records reinforcement signals for later deep ranking.
-- Never writes to `MEMORY.md`.
+Light phase ingests recent recall signals, compresses them into continuity
+patterns, and writes the result into MemPalace diary output.
 
 ### Deep phase
 
-Deep phase decides what becomes long-term memory.
+Deep phase decides what becomes durable memory reinforcement.
 
-- Ranks candidates using weighted scoring and threshold gates.
-- Requires `minScore`, `minRecallCount`, and `minUniqueQueries` to pass.
-- Rehydrates snippets from live daily files before writing, so stale/deleted snippets are skipped.
-- Appends promoted entries to `MEMORY.md`.
-- Writes a `## Deep Sleep` summary into `DREAMS.md` and optionally writes `memory/dreaming/deep/YYYY-MM-DD.md`.
+- In the MemPalace path, it reinforces durable KG facts.
+- In the legacy file-backed path, it promotes entries into `MEMORY.md`.
 
 ### REM phase
 
 REM phase extracts patterns and reflective signals.
 
-- Builds theme and reflection summaries from recent short-term traces.
-- Writes a managed `## REM Sleep` block when storage includes inline output.
-- Records REM reinforcement signals used by deep ranking.
-- Never writes to `MEMORY.md`.
+- In the MemPalace path, it writes associative drawer summaries.
+- In the legacy file-backed path, it writes managed REM markdown output.
 
 ## Dream Diary
 
-Dreaming also keeps a narrative **Dream Diary** in `DREAMS.md`.
-After each phase has enough material, `memory-core` runs a best-effort background
-subagent turn (using the default runtime model) and appends a short diary entry.
-
-This diary is for human reading in the Dreams UI, not a promotion source.
+MemPalace-native dreaming keeps diary continuity inside MemPalace diary output.
+Legacy file-backed dreaming keeps a narrative **Dream Diary** in `DREAMS.md`.
 
 ## Deep ranking signals
 
@@ -92,8 +92,8 @@ Light and REM phase hits add a small recency-decayed boost from
 
 ## Scheduling
 
-When enabled, `memory-core` auto-manages one cron job for a full dreaming
-sweep. Each sweep runs phases in order: light -> REM -> deep.
+When enabled, the active memory plugin auto-manages one cron job for a full
+dreaming sweep. Each sweep runs phases in order: light -> REM -> deep.
 
 Default cadence behavior:
 
@@ -103,7 +103,7 @@ Default cadence behavior:
 
 ## Quick start
 
-Enable dreaming:
+Enable legacy file-backed dreaming:
 
 ```json
 {
@@ -121,7 +121,7 @@ Enable dreaming:
 }
 ```
 
-Enable dreaming with a custom sweep cadence:
+Enable legacy file-backed dreaming with a custom sweep cadence:
 
 ```json
 {
@@ -141,7 +141,7 @@ Enable dreaming with a custom sweep cadence:
 }
 ```
 
-## Slash command
+## Command surfaces
 
 ```
 /dreaming status
@@ -150,9 +150,17 @@ Enable dreaming with a custom sweep cadence:
 /dreaming help
 ```
 
+For the active MemPalace path, prefer:
+
+```bash
+openclaw memory dream status
+openclaw memory dream run
+openclaw memory dream run --json
+```
+
 ## CLI workflow
 
-Use CLI promotion for preview or manual apply:
+Use legacy file-backed CLI promotion for preview or manual apply:
 
 ```bash
 openclaw memory promote
@@ -161,8 +169,8 @@ openclaw memory promote --limit 5
 openclaw memory status --deep
 ```
 
-Manual `memory promote` uses deep-phase thresholds by default unless overridden
-with CLI flags.
+Manual `memory promote` is the legacy `memory-core` path and uses deep-phase
+thresholds by default unless overridden with CLI flags.
 
 Explain why a specific candidate would or would not promote:
 
@@ -181,7 +189,8 @@ openclaw memory rem-harness --json
 
 ## Key defaults
 
-All settings live under `plugins.entries.memory-core.config.dreaming`.
+Legacy file-backed settings live under `plugins.entries.memory-core.config.dreaming`.
+MemPalace-native dreaming settings live under `plugins.entries.mempalace-memory.config.dreaming`.
 
 | Key         | Default     |
 | ----------- | ----------- |

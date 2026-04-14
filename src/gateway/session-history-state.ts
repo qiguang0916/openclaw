@@ -1,3 +1,4 @@
+import { extractAssistantVisibleText } from "../shared/chat-message-content.js";
 import {
   DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
   sanitizeChatHistoryMessages,
@@ -59,6 +60,64 @@ function buildPaginatedSessionHistory(params: {
   };
 }
 
+function isAssistantHistoryMessage(message: SessionHistoryMessage | undefined): boolean {
+  return message?.role === "assistant";
+}
+
+function isToolResultHistoryMessage(message: SessionHistoryMessage | undefined): boolean {
+  return message?.role === "toolResult";
+}
+
+function normalizeAssistantProgressText(text: string | undefined): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
+
+function coalesceProgressiveAssistantSnapshots(
+  messages: SessionHistoryMessage[],
+): SessionHistoryMessage[] {
+  const collapsed: SessionHistoryMessage[] = [];
+  for (const message of messages) {
+    if (!isAssistantHistoryMessage(message)) {
+      collapsed.push(message);
+      continue;
+    }
+    const nextText = normalizeAssistantProgressText(extractAssistantVisibleText(message));
+    if (!nextText) {
+      collapsed.push(message);
+      continue;
+    }
+    let previousAssistantIndex = -1;
+    for (let index = collapsed.length - 1; index >= 0; index -= 1) {
+      if (isAssistantHistoryMessage(collapsed[index])) {
+        previousAssistantIndex = index;
+        break;
+      }
+    }
+    if (previousAssistantIndex < 0) {
+      collapsed.push(message);
+      continue;
+    }
+    const previousAssistant = collapsed[previousAssistantIndex];
+    const previousText = normalizeAssistantProgressText(
+      extractAssistantVisibleText(previousAssistant),
+    );
+    const onlyToolResultsSincePrevious = collapsed
+      .slice(previousAssistantIndex + 1)
+      .every((entry) => isToolResultHistoryMessage(entry));
+    if (
+      previousText &&
+      onlyToolResultsSincePrevious &&
+      (nextText === previousText || nextText.startsWith(previousText))
+    ) {
+      collapsed.splice(previousAssistantIndex, 1);
+      collapsed.push(message);
+      continue;
+    }
+    collapsed.push(message);
+  }
+  return collapsed;
+}
+
 export function resolveMessageSeq(message: SessionHistoryMessage | undefined): number | undefined {
   const seq = message?.__openclaw?.seq;
   return typeof seq === "number" && Number.isFinite(seq) && seq > 0 ? seq : undefined;
@@ -100,10 +159,12 @@ export function buildSessionHistorySnapshot(params: {
   cursor?: string;
 }): SessionHistorySnapshot {
   const history = paginateSessionMessages(
-    toSessionHistoryMessages(
-      sanitizeChatHistoryMessages(
-        params.rawMessages,
-        params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+    coalesceProgressiveAssistantSnapshots(
+      toSessionHistoryMessages(
+        sanitizeChatHistoryMessages(
+          params.rawMessages,
+          params.maxChars ?? DEFAULT_CHAT_HISTORY_TEXT_MAX_CHARS,
+        ),
       ),
     ),
     params.limit,
@@ -186,14 +247,21 @@ export class SessionHistorySseState {
     if (!sanitizedMessage) {
       return null;
     }
-    const nextMessages = [...this.sentHistory.messages, sanitizedMessage];
+    const nextMessages = coalesceProgressiveAssistantSnapshots([
+      ...this.sentHistory.messages,
+      sanitizedMessage,
+    ]);
+    const emittedMessage = nextMessages.at(-1);
+    if (!emittedMessage) {
+      return null;
+    }
     this.sentHistory = buildPaginatedSessionHistory({
       messages: nextMessages,
       hasMore: false,
     });
     return {
-      message: sanitizedMessage,
-      messageSeq: resolveMessageSeq(sanitizedMessage),
+      message: emittedMessage,
+      messageSeq: resolveMessageSeq(emittedMessage),
     };
   }
 

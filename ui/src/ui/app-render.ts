@@ -1,11 +1,12 @@
 import { html, nothing } from "lit";
 import { t } from "../i18n/index.ts";
 import { getSafeLocalStorage } from "../local-storage.ts";
-import { refreshChatAvatar } from "./app-chat.ts";
+import { refreshChatAvatar, resetChatSession } from "./app-chat.ts";
 import { renderUsageTab } from "./app-render-usage-tab.ts";
 import {
   renderChatControls,
   renderChatMobileToggle,
+  resolveChatComposerStatus,
   renderChatSessionSelect,
   renderTab,
   renderSidebarConnectionStatus,
@@ -757,6 +758,7 @@ export function renderApp(state: AppViewState) {
                   ...state.settings,
                   sessionKey: next,
                   lastActiveSessionKey: next,
+                  lastLeadChatSessionKey: next,
                 });
                 void state.loadAssistantIdentity();
               },
@@ -1549,6 +1551,7 @@ export function renderApp(state: AppViewState) {
                 void refreshChatAvatar(state);
               },
               thinkingLevel: state.chatThinkingLevel,
+              composerStatus: resolveChatComposerStatus(state),
               showThinking,
               showToolCalls,
               loading: state.chatLoading,
@@ -1561,6 +1564,14 @@ export function renderApp(state: AppViewState) {
               streamSegments: state.chatStreamSegments,
               stream: state.chatStream,
               streamStartedAt: state.chatStreamStartedAt,
+              waitingStatus: state.chatRunId
+                ? {
+                    lastActivityAt: state.chatLastActivityAt,
+                    lastActivityKind: state.chatLastActivityKind,
+                    recovering: state.chatStaleRecoveryInFlight,
+                    tick: state.chatProgressTick,
+                  }
+                : undefined,
               draft: state.chatMessage,
               queue: state.chatQueue,
               connected: state.connected,
@@ -1592,7 +1603,8 @@ export function renderApp(state: AppViewState) {
               canAbort: Boolean(state.chatRunId),
               onAbort: () => void state.handleAbortChat(),
               onQueueRemove: (id) => state.removeQueuedMessage(id),
-              onNewSession: () => state.handleSendChat("/new", { restoreDraft: true }),
+              onNewSession: () =>
+                void resetChatSession(state as unknown as Parameters<typeof resetChatSession>[0]),
               onClearHistory: async () => {
                 if (!state.client || !state.connected) {
                   return;
@@ -1618,6 +1630,7 @@ export function renderApp(state: AppViewState) {
                   ...state.settings,
                   sessionKey: state.sessionKey,
                   lastActiveSessionKey: state.sessionKey,
+                  lastLeadChatSessionKey: state.sessionKey,
                 });
                 void loadChatHistory(state);
                 void state.loadAssistantIdentity();
@@ -2104,10 +2117,16 @@ export function renderApp(state: AppViewState) {
           ? lazyRender(lazyDreamingView, (m) =>
               m.renderDreaming({
                 active: dreamingOn,
+                backend: state.dreamingStatus?.backend,
                 shortTermCount: state.dreamingStatus?.shortTermCount ?? 0,
                 totalSignalCount: state.dreamingStatus?.totalSignalCount ?? 0,
                 phaseSignalCount: state.dreamingStatus?.phaseSignalCount ?? 0,
                 promotedCount: state.dreamingStatus?.promotedToday ?? 0,
+                lastRunAt: state.dreamingStatus?.lastRunAt ?? null,
+                lastRunPhases: state.dreamingStatus?.lastRunPhases ?? null,
+                lastDrawerVerified: state.dreamingStatus?.lastDrawer?.verified,
+                lastDrawer: state.dreamingStatus?.lastDrawer,
+                lastKgFacts: state.dreamingStatus?.lastKgFacts ?? null,
                 dreamingOf: null,
                 nextCycle: dreamingNextCycle,
                 timezone: state.dreamingStatus?.timezone ?? null,

@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
+  listAgentEntries,
   resolveAgentEffectiveModelPrimary,
   resolveAgentModelFallbacksOverride,
   resolveAgentWorkspaceDir,
@@ -40,6 +41,7 @@ import {
   type SessionScope,
 } from "../config/sessions.js";
 import { openBoundaryFileSync } from "../infra/boundary-file-read.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 import {
   normalizeAgentId,
   normalizeMainKey,
@@ -634,7 +636,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
   const scope = cfg.session?.scope ?? "per-sender";
   const configuredById = new Map<
     string,
-    { name?: string; identity?: GatewayAgentRow["identity"] }
+    { name?: string; identity?: GatewayAgentRow["identity"]; subagentIds?: string[] }
   >();
   for (const entry of cfg.agents?.list ?? []) {
     if (!entry?.id) {
@@ -656,6 +658,9 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
     configuredById.set(normalizeAgentId(entry.id), {
       name: typeof entry.name === "string" && entry.name.trim() ? entry.name.trim() : undefined,
       identity,
+      subagentIds: entry.subagents?.allowAgents
+        ?.map((agentId) => normalizeAgentId(agentId))
+        .filter(Boolean),
     });
   }
   const explicitIds = new Set(
@@ -679,6 +684,7 @@ export function listAgentsForGateway(cfg: OpenClawConfig): {
       identity: meta?.identity,
       workspace: resolveAgentWorkspaceDir(cfg, id),
       ...(model ? { model } : {}),
+      ...(meta?.subagentIds?.length ? { subagentIds: meta.subagentIds } : {}),
     };
   });
   return { defaultId, mainKey, scope, agents };
@@ -1142,6 +1148,57 @@ export function resolveSessionModelIdentityRef(
   return { provider: resolved.provider, model: resolved.model };
 }
 
+// Agent name cache to avoid repeated lookups
+const agentNameCache = new Map<string, string>();
+let agentNameCacheConfigHash: string | null = null;
+const logger = createSubsystemLogger("session-utils");
+
+function getAgentNameFromConfig(cfg: OpenClawConfig, agentId: string): string | undefined {
+  try {
+    // Simple cache invalidation based on config hash
+    const configHash = JSON.stringify(cfg.agents?.list || []);
+    if (configHash !== agentNameCacheConfigHash) {
+      agentNameCache.clear();
+      agentNameCacheConfigHash = configHash;
+      logger.debug("Agent name cache cleared due to config change");
+    }
+
+    // Check cache first
+    const cached = agentNameCache.get(agentId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    // Look up agent in configuration
+    const agents = listAgentEntries(cfg);
+    const agentEntry = agents.find(
+      (agent) => normalizeAgentId(agent.id) === normalizeAgentId(agentId),
+    );
+
+    let agentName: string | undefined;
+    if (agentEntry) {
+      // Prefer the explicit name field, fall back to identity.name
+      agentName = agentEntry.name?.trim() || agentEntry.identity?.name?.trim();
+
+      if (agentName) {
+        logger.debug(`Found agent name for ${agentId}: ${agentName}`);
+      } else {
+        logger.debug(`Agent ${agentId} has no name configured`);
+      }
+    } else {
+      logger.debug(`Agent ${agentId} not found in configuration`);
+    }
+
+    // Cache the result (even if undefined)
+    agentNameCache.set(agentId, agentName || "");
+    return agentName;
+  } catch (error) {
+    // Fallback mechanism: log error but don't crash
+    logger.warn(`Failed to get agent name for ${agentId}: ${String(error)}`);
+    return undefined;
+  }
+}
+
 export function buildGatewaySessionRow(params: {
   cfg: OpenClawConfig;
   storePath: string;
@@ -1163,8 +1220,27 @@ export function buildGatewaySessionRow(params: {
   const id = parsed?.id;
   const origin = entry?.origin;
   const originLabel = origin?.label;
+  const parsedAgent = parseAgentSessionKey(key);
+  let sessionAgentId = normalizeAgentId(parsedAgent?.agentId ?? resolveDefaultAgentId(cfg));
+
+  // Also try to extract agent ID from webchat:g-agent-<id>-main format
+  if (!parsedAgent && key.startsWith("webchat:g-agent-")) {
+    const webchatMatch = key.match(/^webchat:g-agent-([a-z0-9_-]+)-main$/i);
+    if (webchatMatch) {
+      sessionAgentId = normalizeAgentId(webchatMatch[1]);
+    }
+  }
+
+  // Try to get agent name for agent sessions
+  let agentName: string | undefined;
+  if (parsedAgent || key.startsWith("webchat:g-agent-")) {
+    agentName = getAgentNameFromConfig(cfg, sessionAgentId);
+  }
+
   const displayName =
     entry?.displayName ??
+    agentName ??
+    entry?.label ??
     (channel
       ? buildGroupDisplayName({
           provider: channel,
@@ -1175,11 +1251,8 @@ export function buildGatewaySessionRow(params: {
           key,
         })
       : undefined) ??
-    entry?.label ??
     originLabel;
   const deliveryFields = normalizeSessionDeliveryFields(entry);
-  const parsedAgent = parseAgentSessionKey(key);
-  const sessionAgentId = normalizeAgentId(parsedAgent?.agentId ?? resolveDefaultAgentId(cfg));
   const subagentRun = getSessionDisplaySubagentRunByChildSessionKey(key);
   const subagentOwner =
     subagentRun?.controllerSessionKey?.trim() || subagentRun?.requesterSessionKey?.trim();

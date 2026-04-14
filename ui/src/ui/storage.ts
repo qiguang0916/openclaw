@@ -11,12 +11,17 @@ function settingsKeyForGateway(gatewayUrl: string): string {
 type ScopedSessionSelection = {
   sessionKey: string;
   lastActiveSessionKey: string;
+  lastLeadChatSessionKey?: string;
 };
 
-type PersistedUiSettings = Omit<UiSettings, "token" | "sessionKey" | "lastActiveSessionKey"> & {
+type PersistedUiSettings = Omit<
+  UiSettings,
+  "token" | "sessionKey" | "lastActiveSessionKey" | "lastLeadChatSessionKey"
+> & {
   token?: never;
   sessionKey?: string;
   lastActiveSessionKey?: string;
+  lastLeadChatSessionKey?: string;
   sessionsByGateway?: Record<string, ScopedSessionSelection>;
 };
 
@@ -46,6 +51,7 @@ export type UiSettings = {
   token: string;
   sessionKey: string;
   lastActiveSessionKey: string;
+  lastLeadChatSessionKey?: string;
   theme: ThemeName;
   themeMode: ThemeMode;
   chatFocusMode: boolean;
@@ -132,6 +138,10 @@ function resolveScopedSessionSelection(
     return {
       sessionKey: scoped.sessionKey.trim(),
       lastActiveSessionKey: scoped.lastActiveSessionKey.trim(),
+      lastLeadChatSessionKey:
+        typeof scoped.lastLeadChatSessionKey === "string" && scoped.lastLeadChatSessionKey.trim()
+          ? scoped.lastLeadChatSessionKey.trim()
+          : undefined,
     };
   }
 
@@ -147,6 +157,10 @@ function resolveScopedSessionSelection(
   return {
     sessionKey: legacySessionKey,
     lastActiveSessionKey: legacyLastActiveSessionKey,
+    lastLeadChatSessionKey:
+      typeof parsed.lastLeadChatSessionKey === "string" && parsed.lastLeadChatSessionKey.trim()
+        ? parsed.lastLeadChatSessionKey.trim()
+        : undefined,
   };
 }
 
@@ -192,6 +206,7 @@ export function loadSettings(): UiSettings {
     token: loadSessionToken(defaultUrl),
     sessionKey: "main",
     lastActiveSessionKey: "main",
+    lastLeadChatSessionKey: undefined,
     theme: "claw",
     themeMode: "system",
     chatFocusMode: false,
@@ -231,6 +246,7 @@ export function loadSettings(): UiSettings {
       token: loadSessionToken(gatewayUrl),
       sessionKey: scopedSessionSelection.sessionKey,
       lastActiveSessionKey: scopedSessionSelection.lastActiveSessionKey,
+      lastLeadChatSessionKey: scopedSessionSelection.lastLeadChatSessionKey,
       theme,
       themeMode: mode,
       chatFocusMode:
@@ -309,6 +325,9 @@ function persistSettings(next: UiSettings) {
         {
           sessionKey: next.sessionKey,
           lastActiveSessionKey: next.lastActiveSessionKey,
+          ...(next.lastLeadChatSessionKey
+            ? { lastLeadChatSessionKey: next.lastLeadChatSessionKey }
+            : {}),
         },
       ],
     ].slice(-MAX_SCOPED_SESSION_ENTRIES),
@@ -326,6 +345,7 @@ function persistSettings(next: UiSettings) {
     navGroupsCollapsed: next.navGroupsCollapsed,
     borderRadius: next.borderRadius,
     sessionsByGateway,
+    ...(next.lastLeadChatSessionKey ? { lastLeadChatSessionKey: next.lastLeadChatSessionKey } : {}),
     ...(next.locale ? { locale: next.locale } : {}),
   };
   const serialized = JSON.stringify(persisted);

@@ -4,13 +4,14 @@ import { render } from "lit";
 import { describe, expect, it, vi } from "vitest";
 import { i18n } from "../../i18n/index.ts";
 import { getSafeLocalStorage } from "../../local-storage.ts";
-import { renderChatSessionSelect } from "../app-render.helpers.ts";
+import { renderChatSessionSelect, renderTab } from "../app-render.helpers.ts";
 import type { AppViewState } from "../app-view-state.ts";
 import {
   createModelCatalog,
   createSessionsListResult,
   DEEPSEEK_CHAT_MODEL,
   DEFAULT_CHAT_MODEL_CATALOG,
+  OPENAI_GPT5_MODEL,
 } from "../chat-model.test-helpers.ts";
 import { SKIP_DELETE_CONFIRM_KEY } from "../chat/grouped-render.ts";
 import type { GatewayBrowserClient } from "../gateway.ts";
@@ -213,6 +214,7 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
     streamSegments: [],
     stream: null,
     streamStartedAt: null,
+    waitingStatus: undefined,
     assistantAvatarUrl: null,
     draft: "",
     queue: [],
@@ -224,6 +226,7 @@ function createProps(overrides: Partial<ChatProps> = {}): ChatProps {
     focusMode: false,
     assistantName: "OpenClaw",
     assistantAvatar: null,
+    composerStatus: undefined,
     onRefresh: () => undefined,
     onToggleFocusMode: () => undefined,
     onDraftChange: () => undefined,
@@ -496,6 +499,70 @@ describe("chat view", () => {
     );
     expect(groupedLogo).not.toBeNull();
     expect(groupedLogo?.getAttribute("src")).toBe("/openclaw/favicon.svg");
+  });
+
+  it("coalesces progressive assistant snapshots when tool calls are hidden", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          showToolCalls: false,
+          messages: [
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: "我先检查当前记忆系统的配置和状态。",
+                },
+              ],
+              timestamp: 1000,
+            },
+            {
+              role: "toolResult",
+              toolCallId: "tool-1",
+              toolName: "read",
+              content: [{ type: "text", text: "MEMORY.md content" }],
+              timestamp: 1001,
+            },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: "我先检查当前记忆系统的配置和状态。现在让我检查 OpenClaw 的完整配置。",
+                },
+              ],
+              timestamp: 1002,
+            },
+            {
+              role: "toolResult",
+              toolCallId: "tool-2",
+              toolName: "read",
+              content: [{ type: "text", text: "openclaw.json content" }],
+              timestamp: 1003,
+            },
+            {
+              role: "assistant",
+              content: [
+                {
+                  type: "text",
+                  text: "我先检查当前记忆系统的配置和状态。现在让我检查 OpenClaw 的完整配置。接下来我会核对 MemPalace 的配置文件。",
+                },
+              ],
+              timestamp: 1004,
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    const assistantBubbles = Array.from(
+      container.querySelectorAll(".chat-group.assistant .chat-bubble"),
+    );
+    expect(assistantBubbles).toHaveLength(1);
+    expect(container.textContent).toContain("接下来我会核对 MemPalace 的配置文件");
   });
 
   it("keeps the persisted overview locale selected before i18n hydration finishes", async () => {
@@ -958,10 +1025,121 @@ describe("chat view", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the default thinking level in the chat header picker", async () => {
+  it("shows the current owner, model, and thinking mode next to the composer", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          composerStatus: {
+            owner: "贾维斯 (openclaw-optimizer) / main",
+            model: "claude-sonnet-4-6 · anthropic",
+            thinking: "Default (adaptive)",
+          },
+        }),
+      ),
+      container,
+    );
+
+    const status = container.querySelector(".agent-chat__composer-status");
+    expect(status?.textContent).toContain("负责人：贾维斯 (openclaw-optimizer) / main");
+    expect(status?.textContent).toContain("模型：claude-sonnet-4-6 · anthropic");
+    expect(status?.textContent).toContain("思考：Default (adaptive)");
+  });
+
+  it("labels the chat owner, model, and thinking controls", () => {
     const { state } = createChatHeaderState({
       model: "gpt-5",
       modelProvider: "openai",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }),
+    });
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    expect(container.textContent).toContain("负责人");
+    expect(container.textContent).toContain("模型");
+    expect(container.textContent).toContain("思考");
+  });
+
+  it("shows a clear waiting reply indicator while an assistant response is pending", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          stream: "",
+          streamStartedAt: 123,
+          waitingStatus: {
+            lastActivityAt: Date.now() - 4000,
+            lastActivityKind: "后台会话已启动",
+            tick: Date.now(),
+          },
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("正在等待回复");
+    expect(container.textContent).toContain("尚未观察到任何工具或写入动作");
+    expect(container.textContent).toContain("进度播报：");
+  });
+
+  it("shows actual write activity in the waiting indicator when tool output exists", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          stream: "",
+          streamStartedAt: 123,
+          toolMessages: [
+            {
+              role: "assistant",
+              toolCallId: "tool-1",
+              content: [
+                { type: "toolcall", name: "write_file", arguments: { path: "report.md" } },
+                { type: "toolresult", name: "write_file", text: "saved report.md" },
+              ],
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain("实际活动：最近完成了 write_file 写入");
+  });
+
+  it("shows a summarized exec/allowlist block reason while waiting", () => {
+    const container = document.createElement("div");
+    render(
+      renderChat(
+        createProps({
+          stream: "",
+          streamStartedAt: 123,
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: 'System: Exec completed (tidal-gu, code 0) :: not be completed: Bundled plugin public surface access blocked for "memory-core" via memory-core/runtime-api.js: not in allowlist',
+                },
+              ],
+            },
+          ],
+        }),
+      ),
+      container,
+    );
+
+    expect(container.textContent).toContain(
+      "实际阻塞：memory-core/runtime-api.js 未通过 allowlist，后台可能正在重复重试",
+    );
+  });
+
+  it("disables the thinking picker for a model without reasoning support", async () => {
+    const { state } = createChatHeaderState({
+      model: "deepseek-chat",
+      modelProvider: "deepseek",
+      models: createModelCatalog(DEEPSEEK_CHAT_MODEL),
     });
     const container = document.createElement("div");
     render(renderChatSessionSelect(state), container);
@@ -971,13 +1149,36 @@ describe("chat view", () => {
     );
     expect(thinkingSelect).not.toBeNull();
     expect(thinkingSelect?.value).toBe("");
-    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Default (off)");
+    expect(thinkingSelect?.disabled).toBe(true);
+    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Off");
+  });
+
+  it("shows thinking choices for the selected model when it supports reasoning", async () => {
+    const { state } = createChatHeaderState({
+      model: "gpt-5",
+      modelProvider: "openai",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }),
+    });
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    const thinkingSelect = container.querySelector<HTMLSelectElement>(
+      'select[data-chat-thinking-select="true"]',
+    );
+    expect(thinkingSelect).not.toBeNull();
+    expect(thinkingSelect?.disabled).toBe(false);
+    expect(thinkingSelect?.value).toBe("");
+    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Default (low)");
+    expect(Array.from(thinkingSelect?.options ?? []).map((option) => option.value)).toContain(
+      "high",
+    );
   });
 
   it("patches the current session thinking level from the chat header picker", async () => {
     const { state, request } = createChatHeaderState({
       model: "gpt-5",
       modelProvider: "openai",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }),
     });
     const container = document.createElement("div");
     render(renderChatSessionSelect(state), container);
@@ -1003,6 +1204,7 @@ describe("chat view", () => {
       model: "gpt-5",
       modelProvider: "openai",
       thinkingLevel: "high",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }),
     });
     const container = document.createElement("div");
     render(renderChatSessionSelect(state), container);
@@ -1022,6 +1224,69 @@ describe("chat view", () => {
       thinkingLevel: null,
     });
     expect(state.sessionsResult?.sessions[0]?.thinkingLevel).toBeUndefined();
+  });
+
+  it("updates and disables thinking choices when the selected model lacks reasoning support", async () => {
+    const { state } = createChatHeaderState({
+      model: "gpt-5",
+      modelProvider: "openai",
+      thinkingLevel: "high",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }, DEEPSEEK_CHAT_MODEL),
+    });
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    let thinkingSelect = container.querySelector<HTMLSelectElement>(
+      'select[data-chat-thinking-select="true"]',
+    );
+    expect(thinkingSelect?.disabled).toBe(false);
+    expect(thinkingSelect?.value).toBe("high");
+
+    state.chatModelOverrides = {
+      main: { kind: "qualified", value: "deepseek/deepseek-chat" },
+    };
+    render(renderChatSessionSelect(state), container);
+
+    thinkingSelect = container.querySelector<HTMLSelectElement>(
+      'select[data-chat-thinking-select="true"]',
+    );
+    expect(thinkingSelect?.disabled).toBe(true);
+    expect(thinkingSelect?.value).toBe("");
+    expect(thinkingSelect?.options[0]?.textContent?.trim()).toBe("Off");
+  });
+
+  it("clears a thinking override when switching to a model without reasoning support", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+      } satisfies Partial<Response>),
+    );
+    const { state, request } = createChatHeaderState({
+      model: "gpt-5",
+      modelProvider: "openai",
+      thinkingLevel: "high",
+      models: createModelCatalog({ ...OPENAI_GPT5_MODEL, reasoning: true }, DEEPSEEK_CHAT_MODEL),
+    });
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    const modelSelect = container.querySelector<HTMLSelectElement>(
+      'select[data-chat-model-select="true"]',
+    );
+    expect(modelSelect).not.toBeNull();
+
+    modelSelect!.value = "deepseek/deepseek-chat";
+    modelSelect!.dispatchEvent(new Event("change", { bubbles: true }));
+    await flushTasks();
+
+    expect(request).toHaveBeenCalledWith("sessions.patch", {
+      key: "main",
+      model: "deepseek/deepseek-chat",
+      thinkingLevel: null,
+    });
+    expect(state.sessionsResult?.sessions[0]?.thinkingLevel).toBeUndefined();
+    vi.unstubAllGlobals();
   });
 
   it("reloads effective tools after a chat-header model switch for the active tools panel", async () => {
@@ -1400,5 +1665,254 @@ describe("chat view", () => {
     expect(labels.filter((label) => label === "Deep Chat (alpha) / main")).toHaveLength(1);
     expect(labels).toContain("Deep Chat (alpha) / main · named-main");
     expect(labels).toContain("Coding (beta) / main");
+  });
+
+  it("keeps top-level agent entries visible even before they have session rows", () => {
+    const { state } = createChatHeaderState({ omitSessionFromList: true });
+    state.sessionKey = "agent:pub-chief:main";
+    state.settings.sessionKey = state.sessionKey;
+    state.agentsList = {
+      defaultId: "pub-chief",
+      mainKey: "main",
+      scope: "all",
+      agents: [
+        { id: "openclaw-optimizer", name: "openclaw-optimizer", identity: { name: "贾维斯" } },
+        { id: "pub-chief", name: "公众号 lead", subagentIds: ["pub-write", "pub-style"] },
+        { id: "pub-write", name: "内容创作" },
+      ],
+    };
+    state.sessionsResult = {
+      ts: 0,
+      path: "",
+      count: 0,
+      defaults: { modelProvider: "openai", model: "gpt-5", contextTokens: null },
+      sessions: [],
+    };
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    const [sessionSelect] = Array.from(container.querySelectorAll<HTMLSelectElement>("select"));
+    const labels = Array.from(sessionSelect?.querySelectorAll("option") ?? []).map((option) =>
+      option.textContent?.trim(),
+    );
+
+    expect(labels).toContain("贾维斯 (openclaw-optimizer) / main");
+    expect(labels).toContain("公众号 lead (pub-chief) / main");
+    expect(labels).not.toContain("内容创作 (pub-write) / main");
+  });
+
+  it("limits configured production chat choices to team leads and Jarvis specialists out of the chat selector", () => {
+    const { state } = createChatHeaderState({ omitSessionFromList: true });
+    state.sessionKey = "agent:openclaw-optimizer:main";
+    state.settings.sessionKey = state.sessionKey;
+    state.agentsList = {
+      defaultId: "pub-chief",
+      mainKey: "main",
+      scope: "all",
+      agents: [
+        { id: "openclaw-optimizer", name: "贾维斯", identity: { name: "贾维斯" } },
+        { id: "pub-chief", name: "公众号 lead" },
+        { id: "dy-chief", name: "抖音 lead" },
+        { id: "comic-team-lead", name: "AI漫剧团队领导" },
+        { id: "dev-lead", name: "项目开发总控" },
+        { id: "system-architect", name: "系统分析与架构" },
+        { id: "ai-content-workflow", name: "AI内容创作工作流" },
+        { id: "jarvis-memory-admin", name: "贾维斯记忆管理专家", identity: { name: "贾维斯" } },
+        { id: "pub-write", name: "内容创作" },
+      ],
+    };
+    state.sessionsResult = {
+      ts: 0,
+      path: "",
+      count: 3,
+      defaults: { modelProvider: "openai", model: "gpt-5", contextTokens: null },
+      sessions: [
+        {
+          key: "agent:jarvis-memory-admin:main",
+          kind: "direct",
+          updatedAt: null,
+        },
+        {
+          key: "agent:pub-write:main",
+          kind: "direct",
+          updatedAt: null,
+        },
+        {
+          key: "agent:future-lead:main",
+          kind: "direct",
+          updatedAt: null,
+        },
+        {
+          key: "agent:pub-chief:feishu:group:oc_cb6c7fabc38105611482376c8c2d6b90",
+          kind: "group",
+          displayName: "feishu:g-oc_cb6c7fabc38105611482376c8c2d6b90",
+          updatedAt: null,
+        },
+        {
+          key: "agent:dy-chief:feishu:group:oc_2de8bcc679b4eff653f0f4f2b8e44805",
+          kind: "group",
+          displayName: "feishu:g-oc_2de8bcc679b4eff653f0f4f2b8e44805",
+          updatedAt: null,
+        },
+      ],
+    };
+    state.agentsList.agents.push({ id: "future-lead", name: "Future Team Lead" });
+
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    const [sessionSelect] = Array.from(container.querySelectorAll<HTMLSelectElement>("select"));
+    const values = Array.from(sessionSelect?.querySelectorAll("option") ?? []).map(
+      (option) => option.value,
+    );
+
+    expect(values).toContain("agent:openclaw-optimizer:main");
+    expect(values[0]).toBe("agent:openclaw-optimizer:main");
+    expect(values).toContain("agent:pub-chief:main");
+    expect(values).toContain("agent:dy-chief:main");
+    expect(values).toContain("agent:comic-team-lead:main");
+    expect(values).toContain("agent:dev-lead:main");
+    expect(values).toContain("agent:ai-content-workflow:main");
+    expect(values).toContain("agent:future-lead:main");
+    expect(values).not.toContain("agent:system-architect:main");
+    expect(values).not.toContain("agent:jarvis-memory-admin:main");
+    expect(values).not.toContain("agent:pub-write:main");
+    expect(values).not.toContain(
+      "agent:pub-chief:feishu:group:oc_cb6c7fabc38105611482376c8c2d6b90",
+    );
+    expect(values).not.toContain("agent:dy-chief:feishu:group:oc_2de8bcc679b4eff653f0f4f2b8e44805");
+  });
+
+  it("filters channel history when sessions load before the configured agents list", () => {
+    const { state } = createChatHeaderState({ omitSessionFromList: true });
+    state.sessionKey = "agent:dev-lead:main";
+    state.settings.sessionKey = state.sessionKey;
+    state.agentsList = {
+      defaultId: "pub-chief",
+      mainKey: "main",
+      scope: "all",
+      agents: [],
+    };
+    state.sessionsResult = {
+      ts: 0,
+      path: "",
+      count: 5,
+      defaults: { modelProvider: "openai", model: "gpt-5", contextTokens: null },
+      sessions: [
+        {
+          key: "agent:pub-chief:main",
+          kind: "direct",
+          label: "公众号 lead (pub-chief)",
+          updatedAt: null,
+        },
+        {
+          key: "agent:dev-lead:main",
+          kind: "direct",
+          label: "项目开发总控 (dev-lead)",
+          updatedAt: null,
+        },
+        {
+          key: "agent:openclaw-optimizer:main",
+          kind: "direct",
+          label: "贾维斯 (openclaw-optimizer)",
+          updatedAt: null,
+        },
+        {
+          key: "agent:system-architect:main",
+          kind: "direct",
+          label: "系统分析与架构 (system-architect)",
+          updatedAt: null,
+        },
+        {
+          key: "agent:pub-chief:feishu:group:oc_cb6c7fabc38105611482376c8c2d6b90",
+          kind: "group",
+          displayName: "feishu:g-oc_cb6c7fabc38105611482376c8c2d6b90",
+          updatedAt: null,
+        },
+      ],
+    };
+
+    const container = document.createElement("div");
+    render(renderChatSessionSelect(state), container);
+
+    const [sessionSelect] = Array.from(container.querySelectorAll<HTMLSelectElement>("select"));
+    const values = Array.from(sessionSelect?.querySelectorAll("option") ?? []).map(
+      (option) => option.value,
+    );
+
+    expect(values).toContain("agent:pub-chief:main");
+    expect(values).toContain("agent:dev-lead:main");
+    expect(values).toContain("agent:openclaw-optimizer:main");
+    expect(values[0]).toBe("agent:openclaw-optimizer:main");
+    expect(values).not.toContain("agent:system-architect:main");
+    expect(values).not.toContain(
+      "agent:pub-chief:feishu:group:oc_cb6c7fabc38105611482376c8c2d6b90",
+    );
+  });
+
+  it("keeps Jarvis selected when opening chat from the sidebar despite a pub-chief gateway default", () => {
+    const { state } = createChatHeaderState({ omitSessionFromList: true });
+    state.tab = "sessions";
+    state.sessionKey = "agent:openclaw-optimizer:main";
+    state.settings.sessionKey = state.sessionKey;
+    state.settings.lastActiveSessionKey = state.sessionKey;
+    state.hello = {
+      type: "hello-ok",
+      protocol: 3,
+      snapshot: {
+        sessionDefaults: {
+          mainSessionKey: "agent:pub-chief:main",
+          mainKey: "main",
+        },
+      },
+    } as AppViewState["hello"];
+    state.agentsList = {
+      defaultId: "pub-chief",
+      mainKey: "main",
+      scope: "all",
+      agents: [
+        { id: "openclaw-optimizer", name: "贾维斯", identity: { name: "贾维斯" } },
+        { id: "pub-chief", name: "公众号 lead" },
+      ],
+    };
+    state.setTab = vi.fn((tab) => {
+      state.tab = tab as AppViewState["tab"];
+    }) as AppViewState["setTab"];
+
+    const container = document.createElement("div");
+    render(renderTab(state, "chat"), container);
+    container.querySelector<HTMLAnchorElement>("a")?.click();
+
+    expect(state.sessionKey).toBe("agent:openclaw-optimizer:main");
+    expect(state.setTab).toHaveBeenCalledWith("chat");
+  });
+
+  it("opens the last explicitly selected lead chat from the sidebar", () => {
+    const { state } = createChatHeaderState({ omitSessionFromList: true });
+    state.tab = "sessions";
+    state.sessionKey = "agent:openclaw-optimizer:main";
+    state.settings.sessionKey = state.sessionKey;
+    state.settings.lastActiveSessionKey = "agent:pub-chief:main";
+    state.settings.lastLeadChatSessionKey = "agent:dy-chief:main";
+    state.agentsList = {
+      defaultId: "pub-chief",
+      mainKey: "main",
+      scope: "all",
+      agents: [
+        { id: "openclaw-optimizer", name: "贾维斯", identity: { name: "贾维斯" } },
+        { id: "pub-chief", name: "公众号 lead" },
+        { id: "dy-chief", name: "抖音 lead" },
+      ],
+    };
+    state.setTab = vi.fn((tab) => {
+      state.tab = tab as AppViewState["tab"];
+    }) as AppViewState["setTab"];
+
+    const container = document.createElement("div");
+    render(renderTab(state, "chat"), container);
+    container.querySelector<HTMLAnchorElement>("a")?.click();
+
+    expect(state.sessionKey).toBe("agent:dy-chief:main");
+    expect(state.setTab).toHaveBeenCalledWith("chat");
   });
 });

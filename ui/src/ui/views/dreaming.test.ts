@@ -7,10 +7,16 @@ import { renderDreaming, setDreamSubTab, type DreamingProps } from "./dreaming.t
 function buildProps(overrides?: Partial<DreamingProps>): DreamingProps {
   return {
     active: true,
+    backend: undefined,
     shortTermCount: 47,
     totalSignalCount: 182,
     phaseSignalCount: 29,
     promotedCount: 12,
+    lastRunAt: null,
+    lastRunPhases: null,
+    lastDrawerVerified: undefined,
+    lastDrawer: undefined,
+    lastKgFacts: null,
     dreamingOf: null,
     nextCycle: "4:00 AM",
     timezone: "America/Los_Angeles",
@@ -107,6 +113,29 @@ describe("dreaming view", () => {
     expect(detail?.textContent).toContain("4:00 AM");
   });
 
+  it("shows MemPalace-oriented stats and summary when backend is mempalace-memory", () => {
+    const container = renderInto(
+      buildProps({
+        backend: "mempalace-memory",
+        shortTermCount: 4,
+        totalSignalCount: 6,
+        phaseSignalCount: 2,
+        promotedCount: 2,
+        lastDrawerVerified: true,
+        lastRunAt: "2026-04-11T02:00:00.000Z",
+        lastRunPhases: ["light", "rem", "deep"],
+      }),
+    );
+    const labels = Array.from(container.querySelectorAll(".dreams__stat-label")).map((node) =>
+      node.textContent?.trim(),
+    );
+    expect(labels).toEqual(["Recent recalls", "Last run lines", "Verified KG"]);
+    const detail = container.querySelector(".dreams__status-detail span");
+    expect(detail?.textContent).toContain("2 verified facts");
+    expect(detail?.textContent).toContain("drawer verified");
+    expect(detail?.textContent).toContain("phases light, rem, deep");
+  });
+
   it("renders control error when present", () => {
     const container = renderInto(buildProps({ statusError: "patch failed" }));
     expect(container.querySelector(".dreams__controls-error")?.textContent).toContain(
@@ -117,9 +146,10 @@ describe("dreaming view", () => {
   it("renders sub-tab navigation", () => {
     const container = renderInto(buildProps());
     const tabs = container.querySelectorAll(".dreams__tab");
-    expect(tabs.length).toBe(2);
+    expect(tabs.length).toBe(3);
     expect(tabs[0]?.textContent).toContain("Scene");
     expect(tabs[1]?.textContent).toContain("Diary");
+    expect(tabs[2]?.textContent).toContain("Artifacts");
   });
 
   it("renders dream diary with parsed entry on diary tab", () => {
@@ -161,6 +191,58 @@ describe("dreaming view", () => {
     expect(pageInfo?.textContent).toContain("1 / 1");
     const navBtns = container.querySelectorAll(".dreams-diary__nav-btn");
     expect(navBtns.length).toBe(2);
+    setDreamSubTab("scene");
+  });
+
+  it("renders MemPalace artifacts on the artifacts tab", () => {
+    setDreamSubTab("artifacts");
+    const container = renderInto(
+      buildProps({
+        backend: "mempalace-memory",
+        shortTermCount: 4,
+        totalSignalCount: 6,
+        phaseSignalCount: 2,
+        promotedCount: 3,
+        lastDrawerVerified: true,
+        lastDrawer: {
+          wing: "OpenClaw Dreaming",
+          room: "openclaw-optimizer",
+          drawerId: "drawer_123",
+          text: "Recurring associations: DREAMS-MEMPALACE-ARTIFACTS-20260411 (3x)",
+          sourceFile: "dreaming-rem://2026-04-12",
+          verified: true,
+        },
+        lastKgFacts: [
+          {
+            subject: "openclaw-optimizer",
+            predicate: "dreaming_focus",
+            object: "DREAMS-MEMPALACE-ARTIFACTS-20260411",
+            validFrom: "2026-04-12",
+            sourceFile: "dreaming-deep://2026-04-12",
+          },
+        ],
+        lastRunAt: "2026-04-11T02:00:00.000Z",
+        lastRunPhases: ["light", "rem", "deep"],
+      }),
+    );
+    expect(container.querySelector(".dreams-diary__title")?.textContent).toContain(
+      "MemPalace Artifacts",
+    );
+    const text = (container.querySelector(".dreams-diary__prose")?.textContent ?? "").replace(
+      /\s+/g,
+      " ",
+    );
+    expect(text).toContain("KG facts generated: 3");
+    expect(text).toContain("Verified KG facts: 2");
+    expect(text).toContain("Drawer verification: verified and readable");
+    expect(text).toContain("Latest drawer: OpenClaw Dreaming / openclaw-optimizer (drawer_123)");
+    expect(text).toContain(
+      "Drawer preview: Recurring associations: DREAMS-MEMPALACE-ARTIFACTS-20260411 (3x)",
+    );
+    expect(text).toContain("Drawer source: dreaming-rem://2026-04-12");
+    expect(text).toContain(
+      "openclaw-optimizer -> dreaming_focus -> DREAMS-MEMPALACE-ARTIFACTS-20260411",
+    );
     setDreamSubTab("scene");
   });
 

@@ -32,6 +32,245 @@ function isAssistantSilentReply(message: unknown): boolean {
   return typeof text === "string" && isSilentReplyStream(text);
 }
 
+function isUserMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" && role.toLowerCase() === "user";
+}
+
+function optimisticRunId(message: unknown): string | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const runId = (message as { optimisticRunId?: unknown }).optimisticRunId;
+  return typeof runId === "string" && runId.trim() ? runId : null;
+}
+
+function historyHasUserMessage(history: unknown[], optimisticMessage: unknown): boolean {
+  const optimisticText = extractText(optimisticMessage)?.trim();
+  if (!optimisticText) {
+    return false;
+  }
+  return history.some((message) => {
+    if (!isUserMessage(message)) {
+      return false;
+    }
+    const text = extractText(message)?.trim();
+    return Boolean(text && text.includes(optimisticText));
+  });
+}
+
+const assistantRunIds = new WeakMap<object, string>();
+
+function isAssistantMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" && role.toLowerCase() === "assistant";
+}
+
+function rememberAssistantRunId(message: unknown, runId: string | null | undefined) {
+  if (!runId || !message || typeof message !== "object") {
+    return;
+  }
+  assistantRunIds.set(message, runId);
+}
+
+function resolveOpenClawMeta(message: unknown): Record<string, unknown> | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const meta = (message as { __openclaw?: unknown }).__openclaw;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) {
+    return null;
+  }
+  return meta as Record<string, unknown>;
+}
+
+function resolveStringRecordField(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): string | null {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function resolveNumericRecordField(
+  record: Record<string, unknown> | null | undefined,
+  key: string,
+): number | null {
+  const value = record?.[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function resolveAssistantStableKey(message: unknown): string | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const record = message as Record<string, unknown>;
+  const meta = resolveOpenClawMeta(message);
+  const id =
+    resolveStringRecordField(record, "id") ??
+    resolveStringRecordField(record, "messageId") ??
+    resolveStringRecordField(meta, "id");
+  if (id) {
+    return `id:${id}`;
+  }
+  const seq = resolveNumericRecordField(meta, "seq");
+  if (seq != null) {
+    return `seq:${seq}`;
+  }
+  return null;
+}
+
+function withAssistantRunId(
+  message: Record<string, unknown>,
+  runId: string | null | undefined,
+): Record<string, unknown> {
+  if (!runId) {
+    return message;
+  }
+  const meta = resolveOpenClawMeta(message);
+  if (resolveStringRecordField(meta, "clientRunId") === runId) {
+    rememberAssistantRunId(message, runId);
+    return message;
+  }
+  const nextMessage = {
+    ...message,
+    __openclaw: {
+      ...meta,
+      clientRunId: runId,
+    },
+  };
+  rememberAssistantRunId(nextMessage, runId);
+  return nextMessage;
+}
+
+function resolveAssistantRunId(message: unknown): string | null {
+  if (!message || typeof message !== "object") {
+    return null;
+  }
+  const meta = resolveOpenClawMeta(message);
+  return resolveStringRecordField(meta, "clientRunId") ?? assistantRunIds.get(message) ?? null;
+}
+
+function shouldMergeAdjacentAssistantMessages(previous: unknown, next: unknown): boolean {
+  if (!isAssistantMessage(previous) || !isAssistantMessage(next)) {
+    return false;
+  }
+  const previousStableKey = resolveAssistantStableKey(previous);
+  const nextStableKey = resolveAssistantStableKey(next);
+  if (previousStableKey && nextStableKey && previousStableKey === nextStableKey) {
+    return true;
+  }
+  const previousRunId = resolveAssistantRunId(previous);
+  const nextRunId = resolveAssistantRunId(next);
+  if (previousRunId && nextRunId && previousRunId === nextRunId) {
+    return true;
+  }
+  const previousText = extractText(previous)?.trim();
+  const nextText = extractText(next)?.trim();
+  if (!previousText || !nextText) {
+    return false;
+  }
+  if (previousText === nextText) {
+    return true;
+  }
+  return nextText.startsWith(previousText) || previousText.startsWith(nextText);
+}
+
+function pickPreferredAssistantMessage(previous: unknown, next: unknown): unknown {
+  const previousText = extractText(previous)?.trim() ?? "";
+  const nextText = extractText(next)?.trim() ?? "";
+  if (!previousText) {
+    return next;
+  }
+  if (!nextText) {
+    return previous;
+  }
+  if (nextText.startsWith(previousText) && nextText.length >= previousText.length) {
+    return next;
+  }
+  if (previousText.startsWith(nextText) && previousText.length >= nextText.length) {
+    return previous;
+  }
+  return nextText.length >= previousText.length ? next : previous;
+}
+
+function dedupeAssistantHistory(messages: unknown[]): unknown[] {
+  const deduped: unknown[] = [];
+  for (const message of messages) {
+    if (!isAssistantMessage(message)) {
+      deduped.push(message);
+      continue;
+    }
+    const text = extractText(message)?.trim();
+    const previous = deduped[deduped.length - 1];
+    if (!text || !isAssistantMessage(previous)) {
+      deduped.push(message);
+      continue;
+    }
+    if (shouldMergeAdjacentAssistantMessages(previous, message)) {
+      deduped[deduped.length - 1] = pickPreferredAssistantMessage(previous, message);
+      continue;
+    }
+    deduped.push(message);
+  }
+  return deduped;
+}
+
+function upsertAssistantMessage(
+  state: ChatState,
+  message: Record<string, unknown>,
+  runId?: string | null,
+) {
+  const candidate = withAssistantRunId(message, runId);
+  const nextText = extractText(candidate)?.trim() ?? "";
+  const nextMessages = [...state.chatMessages];
+  const nextStableKey = resolveAssistantStableKey(candidate);
+
+  if (nextStableKey || runId) {
+    for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+      const existing = nextMessages[index];
+      if (!isAssistantMessage(existing)) {
+        continue;
+      }
+      const existingStableKey = resolveAssistantStableKey(existing);
+      if (nextStableKey && existingStableKey && existingStableKey === nextStableKey) {
+        nextMessages[index] = candidate;
+        state.chatMessages = nextMessages;
+        return;
+      }
+      if (runId && resolveAssistantRunId(existing) === runId) {
+        nextMessages[index] = candidate;
+        state.chatMessages = nextMessages;
+        return;
+      }
+    }
+  }
+
+  if (nextText) {
+    for (let index = nextMessages.length - 1; index >= 0; index -= 1) {
+      const existing = nextMessages[index];
+      if (!isAssistantMessage(existing)) {
+        continue;
+      }
+      if (shouldMergeAdjacentAssistantMessages(existing, candidate)) {
+        nextMessages[index] = pickPreferredAssistantMessage(existing, candidate);
+        state.chatMessages = nextMessages;
+        return;
+      }
+      break;
+    }
+  }
+
+  nextMessages.push(candidate);
+  state.chatMessages = nextMessages;
+}
+
 export type ChatState = {
   client: GatewayBrowserClient | null;
   connected: boolean;
@@ -72,6 +311,10 @@ export async function loadChatHistory(state: ChatState) {
   if (!state.client || !state.connected) {
     return;
   }
+  const activeRunId = state.chatRunId;
+  const optimisticMessages = activeRunId
+    ? state.chatMessages.filter((message) => optimisticRunId(message) === activeRunId)
+    : [];
   state.chatLoading = true;
   state.lastError = null;
   try {
@@ -83,7 +326,13 @@ export async function loadChatHistory(state: ChatState) {
       },
     );
     const messages = Array.isArray(res.messages) ? res.messages : [];
-    state.chatMessages = messages.filter((message) => !isAssistantSilentReply(message));
+    const nextMessages = dedupeAssistantHistory(
+      messages.filter((message) => !isAssistantSilentReply(message)),
+    );
+    const preservedOptimisticMessages = optimisticMessages.filter(
+      (message) => !historyHasUserMessage(nextMessages, message),
+    );
+    state.chatMessages = [...nextMessages, ...preservedOptimisticMessages];
     state.chatThinkingLevel = res.thinkingLevel ?? null;
     // Clear all streaming state — history includes tool results and text
     // inline, so keeping streaming artifacts would cause duplicates.
@@ -175,6 +424,7 @@ export async function sendChatMessage(
   }
 
   const now = Date.now();
+  const runId = generateUUID();
 
   // Build user message content blocks
   const contentBlocks: Array<{ type: string; text?: string; source?: unknown }> = [];
@@ -197,12 +447,12 @@ export async function sendChatMessage(
       role: "user",
       content: contentBlocks,
       timestamp: now,
+      optimisticRunId: runId,
     },
   ];
 
   state.chatSending = true;
   state.lastError = null;
-  const runId = generateUUID();
   state.chatRunId = runId;
   state.chatStream = "";
   state.chatStreamStartedAt = now;
@@ -263,6 +513,11 @@ export async function abortChatRun(state: ChatState): Promise<boolean> {
       "chat.abort",
       runId ? { sessionKey: state.sessionKey, runId } : { sessionKey: state.sessionKey },
     );
+    if (runId && state.chatRunId === runId) {
+      state.chatRunId = null;
+      state.chatStreamStartedAt = null;
+    }
+    state.chatSending = false;
     return true;
   } catch (err) {
     state.lastError = formatConnectError(err);
@@ -284,7 +539,7 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
     if (payload.state === "final") {
       const finalMessage = normalizeFinalAssistantMessage(payload.message);
       if (finalMessage && !isAssistantSilentReply(finalMessage)) {
-        state.chatMessages = [...state.chatMessages, finalMessage];
+        upsertAssistantMessage(state, finalMessage, payload.runId);
         return null;
       }
       return "final";
@@ -300,16 +555,17 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   } else if (payload.state === "final") {
     const finalMessage = normalizeFinalAssistantMessage(payload.message);
     if (finalMessage && !isAssistantSilentReply(finalMessage)) {
-      state.chatMessages = [...state.chatMessages, finalMessage];
+      upsertAssistantMessage(state, finalMessage, payload.runId);
     } else if (state.chatStream?.trim() && !isSilentReplyStream(state.chatStream)) {
-      state.chatMessages = [
-        ...state.chatMessages,
+      upsertAssistantMessage(
+        state,
         {
           role: "assistant",
           content: [{ type: "text", text: state.chatStream }],
           timestamp: Date.now(),
         },
-      ];
+        payload.runId,
+      );
     }
     state.chatStream = null;
     state.chatRunId = null;
@@ -317,18 +573,19 @@ export function handleChatEvent(state: ChatState, payload?: ChatEventPayload) {
   } else if (payload.state === "aborted") {
     const normalizedMessage = normalizeAbortedAssistantMessage(payload.message);
     if (normalizedMessage && !isAssistantSilentReply(normalizedMessage)) {
-      state.chatMessages = [...state.chatMessages, normalizedMessage];
+      upsertAssistantMessage(state, normalizedMessage, payload.runId);
     } else {
       const streamedText = state.chatStream ?? "";
       if (streamedText.trim() && !isSilentReplyStream(streamedText)) {
-        state.chatMessages = [
-          ...state.chatMessages,
+        upsertAssistantMessage(
+          state,
           {
             role: "assistant",
             content: [{ type: "text", text: streamedText }],
             timestamp: Date.now(),
           },
-        ];
+          payload.runId,
+        );
       }
     }
     state.chatStream = null;

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
-import type { checkQmdBinaryAvailability as checkQmdBinaryAvailabilityFn } from "../plugin-sdk/memory-core-host-engine-qmd.js";
+import type { checkQmdBinaryAvailability as checkQmdBinaryAvailabilityFn } from "../memory-host-sdk/engine-qmd.js";
 import type { DoctorPrompter } from "./doctor-prompter.js";
 
 const note = vi.hoisted(() => vi.fn());
@@ -42,7 +42,7 @@ vi.mock("../plugins/memory-runtime.js", () => ({
   getActiveMemorySearchManager,
 }));
 
-vi.mock("../plugin-sdk/memory-core-host-engine-qmd.js", () => ({
+vi.mock("../memory-host-sdk/engine-qmd.js", () => ({
   checkQmdBinaryAvailability,
 }));
 
@@ -51,13 +51,16 @@ vi.mock("../plugin-sdk/memory-core-engine-runtime.js", () => ({
   repairShortTermPromotionArtifacts,
   getBuiltinMemoryEmbeddingProviderDoctorMetadata: vi.fn((provider: string) => {
     if (provider === "gemini") {
-      return { authProviderId: "google", envVars: ["GEMINI_API_KEY"] };
+      return { authProviderId: "google", envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"] };
     }
     if (provider === "mistral") {
       return { authProviderId: "mistral", envVars: ["MISTRAL_API_KEY"] };
     }
     if (provider === "openai") {
       return { authProviderId: "openai", envVars: ["OPENAI_API_KEY"] };
+    }
+    if (provider === "voyage") {
+      return { authProviderId: "voyage", envVars: ["VOYAGE_API_KEY"] };
     }
     return null;
   }),
@@ -66,6 +69,24 @@ vi.mock("../plugin-sdk/memory-core-engine-runtime.js", () => ({
       providerId: "openai",
       authProviderId: "openai",
       envVars: ["OPENAI_API_KEY"],
+      transport: "remote",
+    },
+    {
+      providerId: "gemini",
+      authProviderId: "google",
+      envVars: ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      transport: "remote",
+    },
+    {
+      providerId: "voyage",
+      authProviderId: "voyage",
+      envVars: ["VOYAGE_API_KEY"],
+      transport: "remote",
+    },
+    {
+      providerId: "mistral",
+      authProviderId: "mistral",
+      envVars: ["MISTRAL_API_KEY"],
       transport: "remote",
     },
     { providerId: "local", authProviderId: "local", envVars: [], transport: "local" },
@@ -130,6 +151,36 @@ describe("noteMemorySearchHealth", () => {
       rewroteStore: false,
       removedStaleLock: false,
     });
+  });
+
+  it("prefers the active memory plugin over disabled legacy memorySearch config", async () => {
+    const cfg = {
+      plugins: {
+        slots: {
+          memory: "mempalace-memory",
+        },
+      },
+    } as OpenClawConfig;
+    const probeEmbeddingAvailability = vi.fn(async () => ({ ok: true }));
+    const close = vi.fn(async () => {});
+    resolveMemorySearchConfig.mockReturnValue(undefined);
+    getActiveMemorySearchManager.mockResolvedValueOnce({
+      manager: {
+        probeEmbeddingAvailability,
+        close,
+      },
+    });
+
+    await noteMemorySearchHealth(cfg, {});
+
+    expect(getActiveMemorySearchManager).toHaveBeenCalledWith({
+      cfg,
+      agentId: "agent-default",
+      purpose: "status",
+    });
+    expect(probeEmbeddingAvailability).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+    expect(note).not.toHaveBeenCalled();
   });
 
   it("does not warn when local provider is set with no explicit modelPath (default model fallback)", async () => {
@@ -431,6 +482,36 @@ describe("noteMemorySearchHealth", () => {
 describe("memory recall doctor integration", () => {
   const cfg = {} as OpenClawConfig;
 
+  beforeEach(() => {
+    note.mockClear();
+    auditShortTermPromotionArtifacts.mockReset();
+    repairShortTermPromotionArtifacts.mockReset();
+    getActiveMemorySearchManager.mockReset();
+    getActiveMemorySearchManager.mockResolvedValue({
+      manager: {
+        status: () => ({ workspaceDir: "/tmp/agent-default/workspace", backend: "builtin" }),
+        close: vi.fn(async () => {}),
+      },
+    });
+    auditShortTermPromotionArtifacts.mockResolvedValue({
+      storePath: "/tmp/agent-default/workspace/memory/.dreams/short-term-recall.json",
+      lockPath: "/tmp/agent-default/workspace/memory/.dreams/short-term-promotion.lock",
+      exists: true,
+      entryCount: 1,
+      promotedCount: 0,
+      spacedEntryCount: 0,
+      conceptTaggedEntryCount: 1,
+      invalidEntryCount: 0,
+      issues: [],
+    });
+    repairShortTermPromotionArtifacts.mockResolvedValue({
+      changed: false,
+      removedInvalidEntries: 0,
+      rewroteStore: false,
+      removedStaleLock: false,
+    });
+  });
+
   function createPrompter(overrides: Partial<DoctorPrompter> = {}): DoctorPrompter {
     return {
       confirm: vi.fn(async () => true),
@@ -490,6 +571,22 @@ describe("memory recall doctor integration", () => {
     expect(message).toContain("memory status --fix");
   });
 
+  it("skips legacy recall-store audit when mempalace-memory owns the active slot", async () => {
+    const mempalaceCfg = {
+      plugins: {
+        slots: {
+          memory: "mempalace-memory",
+        },
+      },
+    } as OpenClawConfig;
+
+    await noteMemoryRecallHealth(mempalaceCfg);
+
+    expect(getActiveMemorySearchManager).not.toHaveBeenCalled();
+    expect(auditShortTermPromotionArtifacts).not.toHaveBeenCalled();
+    expect(note).not.toHaveBeenCalled();
+  });
+
   it("runs memory recall repair during doctor --fix", async () => {
     auditShortTermPromotionArtifacts.mockResolvedValueOnce({
       storePath: "/tmp/agent-default/workspace/memory/.dreams/short-term-recall.json",
@@ -528,6 +625,25 @@ describe("memory recall doctor integration", () => {
     expect(message).toContain("Memory recall artifacts repaired:");
     expect(message).toContain("rewrote recall store");
     expect(message).toContain("removed stale promotion lock");
+  });
+
+  it("skips legacy recall-store repair when mempalace-memory owns the active slot", async () => {
+    const mempalaceCfg = {
+      plugins: {
+        slots: {
+          memory: "mempalace-memory",
+        },
+      },
+    } as OpenClawConfig;
+    const prompter = createPrompter();
+
+    await maybeRepairMemoryRecallHealth({ cfg: mempalaceCfg, prompter });
+
+    expect(getActiveMemorySearchManager).not.toHaveBeenCalled();
+    expect(auditShortTermPromotionArtifacts).not.toHaveBeenCalled();
+    expect(repairShortTermPromotionArtifacts).not.toHaveBeenCalled();
+    expect(prompter.confirmRuntimeRepair).not.toHaveBeenCalled();
+    expect(note).not.toHaveBeenCalled();
   });
 });
 

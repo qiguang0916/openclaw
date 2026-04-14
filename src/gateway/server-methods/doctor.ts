@@ -1,5 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import {
+  type MempalaceDoctorDreamingPayload,
+  readMempalaceDreamDiary,
+  readMempalaceDreamingStatus,
+  shouldUseMempalaceSessionMemory,
+} from "../../../extensions/mempalace-memory/api.js";
 import { resolveAgentWorkspaceDir, resolveDefaultAgentId } from "../../agents/agent-scope.js";
 import { loadConfig } from "../../config/config.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -84,7 +90,7 @@ export type DoctorMemoryStatusPayload = {
     ok: boolean;
     error?: string;
   };
-  dreaming?: DoctorMemoryDreamingPayload;
+  dreaming?: DoctorMemoryDreamingPayload | MempalaceDoctorDreamingPayload;
 };
 
 export type DoctorMemoryDreamDiaryPayload = {
@@ -93,6 +99,7 @@ export type DoctorMemoryDreamDiaryPayload = {
   path: string;
   content?: string;
   updatedAtMs?: number;
+  source?: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -578,40 +585,48 @@ export const doctorHandlers: GatewayRequestHandlers = {
       if (!embedding.ok && !embedding.error) {
         embedding = { ok: false, error: "memory embeddings unavailable" };
       }
-      const nowMs = Date.now();
-      const dreamingConfig = resolveDreamingConfig(cfg);
       const workspaceDir = normalizeTrimmedString((status as Record<string, unknown>).workspaceDir);
-      const configuredWorkspaces = resolveMemoryDreamingWorkspaces(cfg).map(
-        (entry) => entry.workspaceDir,
-      );
-      const allWorkspaces =
-        configuredWorkspaces.length > 0 ? configuredWorkspaces : workspaceDir ? [workspaceDir] : [];
-      const storeStats =
-        allWorkspaces.length > 0
-          ? mergeDreamingStoreStats(
-              await Promise.all(
-                allWorkspaces.map((entry) =>
-                  loadDreamingStoreStats(entry, nowMs, dreamingConfig.timezone),
+      let dreaming: DoctorMemoryStatusPayload["dreaming"] | undefined;
+      if (workspaceDir && shouldUseMempalaceSessionMemory(cfg)) {
+        dreaming = await readMempalaceDreamingStatus({
+          cfg,
+          agentId,
+          workspaceDir,
+        });
+      } else {
+        const nowMs = Date.now();
+        const dreamingConfig = resolveDreamingConfig(cfg);
+        const configuredWorkspaces = resolveMemoryDreamingWorkspaces(cfg).map(
+          (entry) => entry.workspaceDir,
+        );
+        const allWorkspaces =
+          configuredWorkspaces.length > 0
+            ? configuredWorkspaces
+            : workspaceDir
+              ? [workspaceDir]
+              : [];
+        const storeStats =
+          allWorkspaces.length > 0
+            ? mergeDreamingStoreStats(
+                await Promise.all(
+                  allWorkspaces.map((entry) =>
+                    loadDreamingStoreStats(entry, nowMs, dreamingConfig.timezone),
+                  ),
                 ),
-              ),
-            )
-          : {
-              shortTermCount: 0,
-              recallSignalCount: 0,
-              dailySignalCount: 0,
-              totalSignalCount: 0,
-              phaseSignalCount: 0,
-              lightPhaseHitCount: 0,
-              remPhaseHitCount: 0,
-              promotedTotal: 0,
-              promotedToday: 0,
-            };
-      const cronStatuses = await resolveAllManagedDreamingCronStatuses(context);
-      const payload: DoctorMemoryStatusPayload = {
-        agentId,
-        provider: status.provider,
-        embedding,
-        dreaming: {
+              )
+            : {
+                shortTermCount: 0,
+                recallSignalCount: 0,
+                dailySignalCount: 0,
+                totalSignalCount: 0,
+                phaseSignalCount: 0,
+                lightPhaseHitCount: 0,
+                remPhaseHitCount: 0,
+                promotedTotal: 0,
+                promotedToday: 0,
+              };
+        const cronStatuses = await resolveAllManagedDreamingCronStatuses(context);
+        dreaming = {
           ...dreamingConfig,
           ...storeStats,
           phases: {
@@ -628,7 +643,13 @@ export const doctorHandlers: GatewayRequestHandlers = {
               ...cronStatuses.rem,
             },
           },
-        },
+        };
+      }
+      const payload: DoctorMemoryStatusPayload = {
+        agentId,
+        provider: status.provider,
+        embedding,
+        dreaming,
       };
       respond(true, payload, undefined);
     } catch (err) {
@@ -648,7 +669,17 @@ export const doctorHandlers: GatewayRequestHandlers = {
     const cfg = loadConfig();
     const agentId = resolveDefaultAgentId(cfg);
     const workspaceDir = resolveAgentWorkspaceDir(cfg, agentId);
-    const dreamDiary = await readDreamDiary(workspaceDir);
+    const mempalaceDreamDiary =
+      workspaceDir && shouldUseMempalaceSessionMemory(cfg)
+        ? await readMempalaceDreamDiary({
+            cfg,
+            agentId,
+            workspaceDir,
+          })
+        : null;
+    const dreamDiary = mempalaceDreamDiary?.found
+      ? mempalaceDreamDiary
+      : await readDreamDiary(workspaceDir);
     const payload: DoctorMemoryDreamDiaryPayload = {
       agentId,
       ...dreamDiary,

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { deleteSessionsAndRefresh, subscribeSessions, type SessionsState } from "./sessions.ts";
+import {
+  deleteSessionsAndRefresh,
+  loadSessions,
+  subscribeSessions,
+  type SessionsState,
+} from "./sessions.ts";
 
 type RequestFn = (method: string, params?: unknown) => Promise<unknown>;
 
@@ -118,5 +123,47 @@ describe("deleteSessionsAndRefresh", () => {
 
     expect(deleted).toEqual([]);
     expect(request).not.toHaveBeenCalled();
+  });
+});
+
+describe("loadSessions", () => {
+  it("clears stale chat waiting state when the current session has already failed", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === "sessions.list") {
+        return {
+          ts: 0,
+          path: "",
+          count: 1,
+          defaults: { modelProvider: null, model: null, contextTokens: null },
+          sessions: [
+            {
+              key: "main",
+              kind: "direct",
+              updatedAt: Date.now(),
+              status: "failed",
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected method: ${method}`);
+    });
+    const state = createState(request, {
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "",
+      chatStreamStartedAt: 123,
+      chatRunStartedAt: 456,
+      chatSending: true,
+      chatStaleRecoveryInFlight: true,
+    } as Partial<SessionsState>);
+
+    await loadSessions(state);
+
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatStream).toBeNull();
+    expect(state.chatStreamStartedAt).toBeNull();
+    expect(state.chatRunStartedAt).toBe(0);
+    expect(state.chatSending).toBe(false);
+    expect(state.chatStaleRecoveryInFlight).toBe(false);
   });
 });

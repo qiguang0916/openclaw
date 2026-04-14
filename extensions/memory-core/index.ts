@@ -1,3 +1,4 @@
+import type { OpenClawConfig } from "openclaw/plugin-sdk/memory-core";
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { registerMemoryCli } from "./src/cli.js";
 import { registerDreamingCommand } from "./src/dreaming-command.js";
@@ -20,15 +21,26 @@ export {
 } from "./src/flush-plan.js";
 export { buildPromptSection } from "./src/prompt-section.js";
 
+export function shouldRegisterLegacyDreaming(cfg?: OpenClawConfig): boolean {
+  const slot =
+    typeof cfg?.plugins?.slots?.memory === "string" ? cfg.plugins.slots.memory.trim() : "";
+  if (!slot) {
+    return true;
+  }
+  return slot === "memory-core";
+}
+
 export default definePluginEntry({
   id: "memory-core",
-  name: "Memory (Core)",
-  description: "File-backed memory search tools and CLI",
+  name: "Memory (Core Legacy)",
+  description: "Legacy file-backed memory plugin for OpenClaw compatibility",
   kind: "memory",
   register(api) {
     registerBuiltInMemoryEmbeddingProviders(api);
-    registerShortTermPromotionDreaming(api);
-    registerDreamingCommand(api);
+    if (shouldRegisterLegacyDreaming(api.config)) {
+      registerShortTermPromotionDreaming(api);
+      registerDreamingCommand(api);
+    }
     api.registerMemoryPromptSection(buildPromptSection);
     api.registerMemoryFlushPlan(buildMemoryFlushPlan);
     api.registerMemoryRuntime(memoryRuntime);

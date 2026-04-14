@@ -15,6 +15,9 @@ const resolveMemorySearchConfig = vi.hoisted(() =>
   })),
 );
 const getMemorySearchManager = vi.hoisted(() => vi.fn());
+const shouldUseMempalaceSessionMemory = vi.hoisted(() => vi.fn(() => false));
+const readMempalaceDreamingStatus = vi.hoisted(() => vi.fn());
+const readMempalaceDreamDiary = vi.hoisted(() => vi.fn());
 
 vi.mock("../../config/config.js", () => ({
   loadConfig,
@@ -31,6 +34,12 @@ vi.mock("../../agents/memory-search.js", () => ({
 
 vi.mock("../../plugins/memory-runtime.js", () => ({
   getActiveMemorySearchManager: getMemorySearchManager,
+}));
+
+vi.mock("../../../extensions/mempalace-memory/api.js", () => ({
+  shouldUseMempalaceSessionMemory,
+  readMempalaceDreamingStatus,
+  readMempalaceDreamDiary,
 }));
 
 import { doctorHandlers } from "./doctor.js";
@@ -90,6 +99,9 @@ describe("doctor.memory.status", () => {
     resolveAgentWorkspaceDir.mockReset().mockReturnValue("/tmp/openclaw");
     resolveMemorySearchConfig.mockReset().mockReturnValue({ enabled: true });
     getMemorySearchManager.mockReset();
+    shouldUseMempalaceSessionMemory.mockReset().mockReturnValue(false);
+    readMempalaceDreamingStatus.mockReset();
+    readMempalaceDreamDiary.mockReset();
   });
 
   it("returns gateway embedding probe status for the default agent", async () => {
@@ -117,7 +129,7 @@ describe("doctor.memory.status", () => {
         provider: "gemini",
         embedding: { ok: true },
         dreaming: expect.objectContaining({
-          enabled: true,
+          enabled: false,
           shortTermCount: 0,
           totalSignalCount: 0,
           phaseSignalCount: 0,
@@ -398,6 +410,100 @@ describe("doctor.memory.status", () => {
     }
   });
 
+  it("returns MemPalace dreaming status when mempalace-memory owns the active slot", async () => {
+    const close = vi.fn().mockResolvedValue(undefined);
+    loadConfig.mockReturnValue({
+      plugins: {
+        slots: {
+          memory: "mempalace-memory",
+        },
+        entries: {
+          "mempalace-memory": {
+            enabled: true,
+          },
+        },
+      },
+    } as OpenClawConfig);
+    shouldUseMempalaceSessionMemory.mockReturnValue(true);
+    readMempalaceDreamingStatus.mockResolvedValue({
+      backend: "mempalace-memory",
+      enabled: true,
+      cron: "0 */6 * * *",
+      lookbackDays: 7,
+      limit: 5,
+      kgThemes: 3,
+      recentRecallQueryCount: 4,
+      lastRunAt: "2026-04-11T02:00:00.000Z",
+      lastRunPhases: ["light", "rem", "deep"],
+      lastRunLineCount: 6,
+      lastKgFactCount: 2,
+      lastVerifiedKgFacts: 2,
+      lastDrawer: {
+        wing: "OpenClaw Dreaming",
+        room: "Main",
+        verified: true,
+      },
+      phases: {
+        light: {
+          enabled: true,
+          cron: "0 */6 * * *",
+          lookbackDays: 7,
+          limit: 5,
+          managedCronPresent: false,
+        },
+        deep: {
+          enabled: true,
+          cron: "0 */6 * * *",
+          limit: 3,
+          minScore: 0,
+          minRecallCount: 0,
+          minUniqueQueries: 0,
+          recencyHalfLifeDays: 7,
+          managedCronPresent: false,
+        },
+        rem: {
+          enabled: true,
+          cron: "0 */6 * * *",
+          lookbackDays: 7,
+          limit: 5,
+          minPatternStrength: 0,
+          managedCronPresent: false,
+        },
+      },
+    });
+    getMemorySearchManager.mockResolvedValue({
+      manager: {
+        status: () => ({ provider: "mempalace", workspaceDir: "/tmp/openclaw" }),
+        probeEmbeddingAvailability: vi.fn().mockResolvedValue({ ok: true }),
+        close,
+      },
+    });
+    const respond = vi.fn();
+
+    await invokeDoctorMemoryStatus(respond);
+
+    expect(readMempalaceDreamingStatus).toHaveBeenCalledWith({
+      cfg: expect.any(Object),
+      agentId: "main",
+      workspaceDir: "/tmp/openclaw",
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        agentId: "main",
+        provider: "mempalace",
+        embedding: { ok: true },
+        dreaming: expect.objectContaining({
+          backend: "mempalace-memory",
+          recentRecallQueryCount: 4,
+          lastVerifiedKgFacts: 2,
+        }),
+      }),
+      undefined,
+    );
+    expect(close).toHaveBeenCalled();
+  });
+
   it("falls back to the manager workspace when no configured dreaming workspaces resolve", async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), "doctor-memory-fallback-"));
     const storePath = path.join(workspaceDir, "memory", ".dreams", "short-term-recall.json");
@@ -575,6 +681,8 @@ describe("doctor.memory.dreamDiary", () => {
     loadConfig.mockClear();
     resolveDefaultAgentId.mockClear();
     resolveAgentWorkspaceDir.mockReset().mockReturnValue("/tmp/openclaw");
+    shouldUseMempalaceSessionMemory.mockReset().mockReturnValue(false);
+    readMempalaceDreamDiary.mockReset();
   });
 
   it("reads DREAMS.md when present", async () => {
@@ -615,7 +723,7 @@ describe("doctor.memory.dreamDiary", () => {
         expect.objectContaining({
           agentId: "main",
           found: true,
-          path: "dreams.md",
+          path: "DREAMS.md",
           content: "lowercase diary\n",
           updatedAtMs: expect.any(Number),
         }),
@@ -645,5 +753,43 @@ describe("doctor.memory.dreamDiary", () => {
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });
     }
+  });
+
+  it("prefers MemPalace dreaming diary when mempalace-memory owns the active slot", async () => {
+    loadConfig.mockReturnValue({
+      plugins: {
+        slots: {
+          memory: "mempalace-memory",
+        },
+      },
+    } as OpenClawConfig);
+    resolveAgentWorkspaceDir.mockReturnValue("/tmp/openclaw");
+    shouldUseMempalaceSessionMemory.mockReturnValue(true);
+    readMempalaceDreamDiary.mockResolvedValue({
+      found: true,
+      path: "mempalace://diary/main/dreaming-light",
+      content: "MemPalace dreaming ran for Main.",
+      updatedAtMs: 123,
+      source: "mempalace-events",
+    });
+    const respond = vi.fn();
+
+    await invokeDoctorMemoryDreamDiary(respond);
+
+    expect(readMempalaceDreamDiary).toHaveBeenCalledWith({
+      cfg: expect.any(Object),
+      agentId: "main",
+      workspaceDir: "/tmp/openclaw",
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        agentId: "main",
+        found: true,
+        path: "mempalace://diary/main/dreaming-light",
+        source: "mempalace-events",
+      }),
+      undefined,
+    );
   });
 });

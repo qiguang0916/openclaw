@@ -38,6 +38,7 @@ export const AgentSummarySchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    subagentIds: Type.Optional(Type.Array(NonEmptyString)),
   },
   { additionalProperties: false },
 );

@@ -17,6 +17,7 @@ export type GatewayAgentRow = {
   identity?: GatewayAgentIdentity;
   workspace?: string;
   model?: GatewayAgentModel;
+  subagentIds?: string[];
 };
 
 export type SessionsListResultBase<TDefaults, TRow> = {

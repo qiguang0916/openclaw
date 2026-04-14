@@ -45,9 +45,9 @@ function formatEnabled(value: boolean): string {
 
 function formatPhaseGuide(): string {
   return [
-    "- implementation detail: each sweep runs light -> REM -> deep.",
-    "- deep is the only stage that writes durable entries to MEMORY.md.",
-    "- DREAMS.md is for human-readable dreaming summaries and diary entries.",
+    "- legacy file-backed flow: each sweep runs light -> REM -> deep.",
+    "- deep is the only stage that writes durable entries to MEMORY.md in the legacy memory-core path.",
+    "- DREAMS.md is for human-readable dreaming summaries and diary entries in the legacy file-backed path.",
   ].join("\n");
 }
 
@@ -61,7 +61,7 @@ function formatStatus(cfg: OpenClawConfig): string {
   const timezone = dreaming.timezone ? ` (${dreaming.timezone})` : "";
 
   return [
-    "Dreaming status:",
+    "Dreaming status (legacy file-backed memory-core):",
     `- enabled: ${formatEnabled(dreaming.enabled)}${timezone}`,
     `- sweep cadence: ${dreaming.frequency}`,
     `- promotion policy: score>=${deep.minScore}, recalls>=${deep.minRecallCount}, uniqueQueries>=${deep.minUniqueQueries}`,
@@ -80,10 +80,22 @@ function formatUsage(includeStatus: string): string {
   ].join("\n");
 }
 
+function formatPrimaryMemPalaceGuidance(cfg: OpenClawConfig): string | null {
+  const slot =
+    typeof cfg.plugins?.slots?.memory === "string" ? cfg.plugins.slots.memory.trim() : "";
+  if (slot !== "mempalace-memory") {
+    return null;
+  }
+  return [
+    "Primary dreaming path now lives under MemPalace.",
+    "/dreaming now targets the legacy compatibility lane; prefer `openclaw memory dream status` and `openclaw memory dream run` for the active path.",
+  ].join("\n");
+}
+
 export function registerDreamingCommand(api: OpenClawPluginApi): void {
   api.registerCommand({
     name: "dreaming",
-    description: "Enable or disable memory dreaming.",
+    description: "Enable or disable legacy file-backed memory-core dreaming.",
     acceptsArgs: true,
     handler: async (ctx) => {
       const args = ctx.args?.trim() ?? "";
@@ -99,11 +111,22 @@ export function registerDreamingCommand(api: OpenClawPluginApi): void {
         firstToken === "options" ||
         firstToken === "phases"
       ) {
-        return { text: formatUsage(formatStatus(currentConfig)) };
+        return {
+          text: [
+            formatUsage(formatStatus(currentConfig)),
+            formatPrimaryMemPalaceGuidance(currentConfig),
+          ]
+            .filter(Boolean)
+            .join("\n\n"),
+        };
       }
 
       if (firstToken === "status") {
-        return { text: formatStatus(currentConfig) };
+        return {
+          text: [formatStatus(currentConfig), formatPrimaryMemPalaceGuidance(currentConfig)]
+            .filter(Boolean)
+            .join("\n\n"),
+        };
       }
 
       if (firstToken === "on" || firstToken === "off") {
@@ -112,7 +135,7 @@ export function registerDreamingCommand(api: OpenClawPluginApi): void {
         await api.runtime.config.writeConfigFile(nextConfig);
         return {
           text: [
-            `Dreaming ${enabled ? "enabled" : "disabled"}.`,
+            `Legacy memory-core dreaming ${enabled ? "enabled" : "disabled"}.`,
             "",
             formatStatus(nextConfig),
           ].join("\n"),

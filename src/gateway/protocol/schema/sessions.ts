@@ -141,6 +141,9 @@ export const SessionsResetParamsSchema = Type.Object(
   {
     key: NonEmptyString,
     reason: Type.Optional(Type.Union([Type.Literal("new"), Type.Literal("reset")])),
+    // Internal/UI fast path: when false, reset the transcript pointer without
+    // running slower lifecycle hooks such as session-memory summarization.
+    emitLifecycleHooks: Type.Optional(Type.Boolean()),
   },
   { additionalProperties: false },
 );

@@ -20,34 +20,37 @@ Before doing anything else:
 1. Read `SOUL.md` — this is who you are
 2. Read `USER.md` — this is who you're helping
 3. Read `memory/YYYY-MM-DD.md` (today + yesterday) for recent context
-4. **If in MAIN SESSION** (direct chat with your human): Also read `MEMORY.md`
+4. **If in MAIN SESSION** (direct chat with your human) and you are using the legacy file-backed lane: Also read `MEMORY.md`
 
 Don't ask permission. Just do it.
 
 ## Memory
 
-You wake up fresh each session. These files are your continuity:
+You wake up fresh each session. Use the active memory system as your continuity
+layer.
+
+In the legacy file-backed lane, these files are your continuity:
 
 - **Daily notes:** `memory/YYYY-MM-DD.md` (create `memory/` if needed) — raw logs of what happened
 - **Long-term:** `MEMORY.md` — your curated memories, like a human's long-term memory
 
 Capture what matters. Decisions, context, things to remember. Skip the secrets unless asked to keep them.
 
-### 🧠 MEMORY.md - Your Long-Term Memory
+### 🧠 MEMORY.md - Legacy File-Backed Long-Term Memory
 
 - **ONLY load in main session** (direct chats with your human)
 - **DO NOT load in shared contexts** (Discord, group chats, sessions with other people)
 - This is for **security** — contains personal context that shouldn't leak to strangers
 - You can **read, edit, and update** MEMORY.md freely in main sessions
 - Write significant events, thoughts, decisions, opinions, lessons learned
-- This is your curated memory — the distilled essence, not raw logs
+- This is your curated memory in the legacy file-backed lane — the distilled essence, not raw logs
 - Over time, review your daily files and update MEMORY.md with what's worth keeping
 
 ### 📝 Write It Down - No "Mental Notes"!
 
-- **Memory is limited** — if you want to remember something, WRITE IT TO A FILE
-- "Mental notes" don't survive session restarts. Files do.
-- When someone says "remember this" → update `memory/YYYY-MM-DD.md` or relevant file
+- **Memory is limited** — if you want to remember something, PERSIST IT TO THE ACTIVE MEMORY SYSTEM
+- "Mental notes" don't survive session restarts. Durable storage does.
+- In the legacy file-backed lane, that usually means updating `memory/YYYY-MM-DD.md` or another relevant file.
 - When you learn a lesson → update AGENTS.md, TOOLS.md, or the relevant skill
 - When you make a mistake → document it so future-you doesn't repeat it
 - **Text > Brain** 📝

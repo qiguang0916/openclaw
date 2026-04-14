@@ -26,6 +26,7 @@ import { loadInternalHooks } from "../hooks/loader.js";
 import { isTruthyEnvValue } from "../infra/env.js";
 import type { loadOpenClawPlugins } from "../plugins/loader.js";
 import { type PluginServicesHandle, startPluginServices } from "../plugins/services.js";
+import { startGatewayBundleWatch } from "./server-bundle-watch.js";
 import {
   scheduleRestartSentinelWake,
   shouldWakeFromRestartSentinel,
@@ -214,6 +215,8 @@ export async function startGatewaySidecars(params: {
       void scheduleRestartSentinelWake({ deps: params.deps });
     }, 750);
   }
+
+  startGatewayBundleWatch();
 
   return { pluginServices };
 }

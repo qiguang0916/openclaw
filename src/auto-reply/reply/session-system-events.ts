@@ -15,9 +15,26 @@ export async function drainFormattedSystemEvents(params: {
   isMainSession: boolean;
   isNewSession: boolean;
 }): Promise<string | undefined> {
+  const isMaintenanceSystemEvent = (line: string): boolean => {
+    const normalized = line.trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+    return (
+      normalized.startsWith("gateway restart ") ||
+      normalized.includes("config-patch") ||
+      normalized.startsWith("run: openclaw doctor ") ||
+      normalized.startsWith("run: openclaw doctor--") ||
+      normalized.startsWith("run: openclaw doctor --")
+    );
+  };
+
   const compactSystemEvent = (line: string): string | null => {
     const trimmed = line.trim();
     if (!trimmed) {
+      return null;
+    }
+    if (params.isMainSession && isMaintenanceSystemEvent(trimmed)) {
       return null;
     }
     const lower = trimmed.toLowerCase();

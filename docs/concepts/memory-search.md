@@ -9,9 +9,13 @@ read_when:
 
 # Memory Search
 
-`memory_search` finds relevant notes from your memory files, even when the
-wording differs from the original text. It works by indexing memory into small
-chunks and searching them using embeddings, keywords, or both.
+`memory_search` remains the canonical recall interface, but the substrate behind
+it depends on the active memory plugin.
+
+- In the active MemPalace path, `memory_search` runs against MemPalace drawers
+  and KG-backed recall.
+- In the legacy file-backed lane, it indexes memory files into chunks and
+  searches them using embeddings, keywords, or both.
 
 ## Quick start
 
@@ -75,7 +79,8 @@ Two optional features help when you have a large note history:
 
 Old notes gradually lose ranking weight so recent information surfaces first.
 With the default half-life of 30 days, a note from last month scores at 50% of
-its original weight. Evergreen files like `MEMORY.md` are never decayed.
+its original weight. In the legacy file-backed lane, evergreen files like
+`MEMORY.md` are never decayed.
 
 <Tip>
 Enable temporal decay if your agent has months of daily notes and stale

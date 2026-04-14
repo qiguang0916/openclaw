@@ -39,6 +39,19 @@ import { resolveTheme, type ResolvedTheme, type ThemeMode, type ThemeName } from
 import type { AgentsListResult, AttentionItem } from "./types.ts";
 import { resetChatViewState } from "./views/chat.ts";
 
+const DEFAULT_CHAT_SESSION_KEY = "agent:openclaw-optimizer:main";
+
+function normalizeChatSessionUrlSelection(session: string, tab: Tab): string {
+  const trimmed = session.trim();
+  if (tab !== "chat") {
+    return trimmed;
+  }
+  const normalized = trimmed.toLowerCase();
+  return normalized === "main" || normalized === "agent:main:main"
+    ? DEFAULT_CHAT_SESSION_KEY
+    : trimmed;
+}
+
 type SettingsHost = {
   settings: UiSettings;
   password?: string;
@@ -84,6 +97,19 @@ export function applySettings(host: SettingsHost, next: UiSettings) {
   }
   applyBorderRadius(next.borderRadius);
   host.applySessionKey = host.settings.lastActiveSessionKey;
+}
+
+function isChatLeadMainSessionKey(sessionKey: string): boolean {
+  const normalized = sessionKey.trim().toLowerCase();
+  return (
+    normalized === "agent:openclaw-optimizer:main" ||
+    normalized === "agent:pub-chief:main" ||
+    normalized === "agent:dy-chief:main" ||
+    normalized === "agent:comic-team-lead:main" ||
+    normalized === "agent:dev-lead:main" ||
+    normalized === "agent:ai-content-workflow:main" ||
+    /^agent:[a-z0-9_-]+-(?:lead|chief):main$/i.test(normalized)
+  );
 }
 
 export function setLastActiveSessionKey(host: SettingsHost, next: string) {
@@ -152,13 +178,14 @@ export function applySettingsFromUrl(host: SettingsHost) {
   }
 
   if (sessionRaw != null) {
-    const session = sessionRaw.trim();
+    const session = normalizeChatSessionUrlSelection(sessionRaw, host.tab);
     if (session) {
       host.sessionKey = session;
       applySettings(host, {
         ...host.settings,
         sessionKey: session,
         lastActiveSessionKey: session,
+        ...(isChatLeadMainSessionKey(session) ? { lastLeadChatSessionKey: session } : {}),
       });
     }
   }
@@ -237,6 +264,9 @@ export async function refreshActiveTab(host: SettingsHost) {
     await loadUsage(host as unknown as OpenClawApp);
   }
   if (host.tab === "sessions") {
+    await loadSessions(host as unknown as OpenClawApp);
+  }
+  if (host.tab === "chat") {
     await loadSessions(host as unknown as OpenClawApp);
   }
   if (host.tab === "cron") {

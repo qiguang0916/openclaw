@@ -72,6 +72,38 @@ function hasToolCallName(block: RawToolCallBlock, allowedToolNames: Set<string> 
   return allowedToolNames.has(trimmed.toLowerCase());
 }
 
+function resolveToolCallPath(block: RawToolCallBlock): string | undefined {
+  const candidates = [block.arguments, block.input];
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      continue;
+    }
+    const record = candidate as Record<string, unknown>;
+    const rawPath =
+      typeof record.path === "string"
+        ? record.path
+        : typeof record.file_path === "string"
+          ? record.file_path
+          : undefined;
+    if (typeof rawPath === "string") {
+      return rawPath;
+    }
+  }
+  return undefined;
+}
+
+function hasDirectoryLikeReadPath(block: RawToolCallBlock): boolean {
+  if (typeof block.name !== "string" || block.name.trim().toLowerCase() !== "read") {
+    return false;
+  }
+  const rawPath = resolveToolCallPath(block);
+  const trimmed = rawPath?.trim();
+  if (!trimmed) {
+    return false;
+  }
+  return trimmed === "." || trimmed === ".." || /[\\/]$/u.test(trimmed);
+}
+
 function redactSessionsSpawnAttachmentsArgs(value: unknown): unknown {
   if (!value || typeof value !== "object") {
     return value;
@@ -251,7 +283,8 @@ export function repairToolCallInputs(
         isRawToolCallBlock(block) &&
         (!hasToolCallInput(block) ||
           !hasToolCallId(block) ||
-          !hasToolCallName(block, allowedToolNames))
+          !hasToolCallName(block, allowedToolNames) ||
+          hasDirectoryLikeReadPath(block))
       ) {
         droppedToolCalls += 1;
         droppedInMessage += 1;

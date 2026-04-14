@@ -128,15 +128,19 @@ export function resolvePluginTools(params: {
       continue;
     }
     let resolved: AnyAgentTool | AnyAgentTool[] | null | undefined = null;
+    const factory = entry.factory;
+    if (!factory) {
+      continue;
+    }
     try {
-      resolved = entry.factory(params.context);
+      resolved = factory(params.context);
     } catch (err) {
       context.logger.error(`plugin tool failed (${entry.pluginId}): ${String(err)}`);
       continue;
     }
     if (!resolved) {
       if (entry.names.length > 0) {
-        context.logger.debug(
+        context.logger.debug?.(
           `plugin tool factory returned null (${entry.pluginId}): [${entry.names.join(", ")}]`,
         );
       }

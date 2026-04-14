@@ -64,6 +64,26 @@ describe("system events (session routing)", () => {
     expect(peekSystemEvents("discord:group:123")).toEqual([]);
   });
 
+  it("filters maintenance system events from main-session chat injection", async () => {
+    const key = "agent:main:main";
+    enqueueSystemEvent("Gateway restart config-patch ok (config.patch)", {
+      sessionKey: key,
+    });
+    enqueueSystemEvent("Run: openclaw doctor --non-interactive", {
+      sessionKey: key,
+    });
+    enqueueSystemEvent("Model switched.", {
+      sessionKey: key,
+    });
+
+    const main = await drainFormattedEvents(key, { isMainSession: true });
+
+    expect(main).toContain("System:");
+    expect(main).toContain("Model switched.");
+    expect(main).not.toContain("Gateway restart");
+    expect(main).not.toContain("openclaw doctor");
+  });
+
   it("requires an explicit session key", () => {
     expect(() => enqueueSystemEvent("Node: Mac Studio", { sessionKey: " " })).toThrow("sessionKey");
   });

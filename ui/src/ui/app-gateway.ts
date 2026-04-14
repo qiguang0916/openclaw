@@ -16,7 +16,7 @@ import {
 } from "./app-settings.ts";
 import { handleAgentEvent, resetToolStream, type AgentEventPayload } from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
-import { shouldReloadHistoryForFinalEvent } from "./chat-event-reload.ts";
+import { appendChatDiagnostic } from "./chat-diagnostics.ts";
 import { formatConnectError } from "./connect-error.ts";
 import { loadAgents } from "./controllers/agents.ts";
 import { loadAssistantIdentity } from "./controllers/assistant-identity.ts";
@@ -48,6 +48,7 @@ import type {
   PresenceEntry,
   HealthSummary,
   StatusSummary,
+  SessionsListResult,
   UpdateAvailable,
 } from "./types.ts";
 
@@ -83,12 +84,36 @@ type GatewayHost = {
   assistantAgentId: string | null;
   serverVersion: string | null;
   sessionKey: string;
+  chatLastActivityAt: number;
+  chatLastActivityKind: string | null;
+  chatProgressTick: number;
   chatRunId: string | null;
+  sessionsResult: SessionsListResult | null;
   refreshSessionsAfterChat: Set<string>;
   execApprovalQueue: ExecApprovalRequest[];
   execApprovalError: string | null;
   updateAvailable: UpdateAvailable | null;
 };
+
+function markChatActivity(host: GatewayHost, kind: string, ts = Date.now(), runId?: string | null) {
+  host.chatLastActivityAt = ts;
+  host.chatLastActivityKind = kind;
+  host.chatProgressTick = ts;
+  appendChatDiagnostic({
+    ts,
+    sessionKey: host.sessionKey,
+    runId: runId ?? host.chatRunId,
+    kind: "activity",
+    summary: kind,
+  });
+  host.eventLogBuffer = [
+    { ts, event: "chat.diag", payload: { runId: runId ?? host.chatRunId, summary: kind } },
+    ...host.eventLogBuffer,
+  ].slice(0, 250);
+  if (host.tab === "debug" || host.tab === "overview") {
+    host.eventLog = host.eventLogBuffer;
+  }
+}
 
 type SessionDefaultsSnapshot = {
   defaultAgentId?: string;
@@ -351,11 +376,60 @@ function handleChatGatewayEvent(host: GatewayHost, payload: ChatEventPayload | u
       payload.sessionKey,
     );
   }
+  if (payload?.state === "delta") {
+    markChatActivity(host, "模型正在流式回复", Date.now(), payload.runId);
+  } else if (payload?.state === "final") {
+    markChatActivity(host, "已收到最终结果", Date.now(), payload.runId);
+  } else if (payload?.state === "aborted") {
+    markChatActivity(host, "当前执行已中止", Date.now(), payload.runId);
+  } else if (payload?.state === "error") {
+    markChatActivity(host, "后台返回了错误", Date.now(), payload.runId);
+  }
   const state = handleChatEvent(host as unknown as OpenClawApp, payload);
   const historyReloaded = handleTerminalChatEvent(host, payload, state);
-  if (state === "final" && !historyReloaded && shouldReloadHistoryForFinalEvent(payload)) {
+  if (state === "final" && !historyReloaded && !payload?.message) {
     void loadChatHistory(host as unknown as OpenClawApp);
   }
+}
+
+function recoverChatRunFromTerminalSessionChange(
+  host: GatewayHost,
+  payload: { clientRunId?: unknown; phase?: unknown; sessionKey?: unknown } | undefined,
+): boolean {
+  if (typeof payload?.sessionKey !== "string" || payload.sessionKey !== host.sessionKey) {
+    return false;
+  }
+  if (!host.chatRunId) {
+    return false;
+  }
+  const phase = typeof payload.phase === "string" ? payload.phase : null;
+  if (phase !== "end" && phase !== "error") {
+    return false;
+  }
+  if (typeof payload.clientRunId === "string") {
+    if (payload.clientRunId !== host.chatRunId) {
+      return false;
+    }
+  } else {
+    const toolHost = host as unknown as Parameters<typeof resetToolStream>[0];
+    if (toolHost.toolStreamOrder.length === 0) {
+      return false;
+    }
+  }
+
+  const activeRunId = host.chatRunId;
+  markChatActivity(host, "会话已结束，正在同步结果");
+  resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+  clearPendingQueueItemsForRun(
+    host as unknown as Parameters<typeof clearPendingQueueItemsForRun>[0],
+    activeRunId,
+  );
+  (host as unknown as { chatStream: string | null }).chatStream = null;
+  (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
+  host.chatRunId = null;
+  void flushChatQueueForEvent(host as unknown as Parameters<typeof flushChatQueueForEvent>[0]);
+  void loadChatHistory(host as unknown as OpenClawApp);
+  return true;
 }
 
 function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
@@ -367,19 +441,52 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
     host.eventLog = host.eventLogBuffer;
   }
 
-  if (evt.event === "agent") {
+  if (evt.event === "agent" || evt.event === "session.tool") {
     if (host.onboarding) {
       return;
     }
-    handleAgentEvent(
-      host as unknown as Parameters<typeof handleAgentEvent>[0],
-      evt.payload as AgentEventPayload | undefined,
-    );
+    const payload = evt.payload as AgentEventPayload | undefined;
+    if (payload?.stream === "tool") {
+      const name =
+        payload.data && typeof payload.data.name === "string" ? payload.data.name : "tool";
+      markChatActivity(host, `工具执行中：${name}`);
+    }
+    handleAgentEvent(host as unknown as Parameters<typeof handleAgentEvent>[0], payload);
     return;
   }
 
   if (evt.event === "chat") {
     handleChatGatewayEvent(host, evt.payload as ChatEventPayload | undefined);
+    return;
+  }
+
+  if (evt.event === "chat.progress") {
+    const payload = evt.payload as
+      | {
+          runId?: unknown;
+          sessionKey?: unknown;
+          summary?: unknown;
+          ts?: unknown;
+        }
+      | undefined;
+    if (
+      typeof payload?.sessionKey === "string" &&
+      payload.sessionKey === host.sessionKey &&
+      typeof payload.summary === "string"
+    ) {
+      if (
+        !host.chatRunId ||
+        typeof payload.runId !== "string" ||
+        payload.runId === host.chatRunId
+      ) {
+        markChatActivity(
+          host,
+          payload.summary,
+          typeof payload.ts === "number" ? payload.ts : Date.now(),
+          typeof payload.runId === "string" ? payload.runId : null,
+        );
+      }
+    }
     return;
   }
 
@@ -410,7 +517,35 @@ function handleGatewayEventUnsafe(host: GatewayHost, evt: GatewayEventFrame) {
   }
 
   if (evt.event === "sessions.changed") {
+    const payload = evt.payload as
+      | { clientRunId?: unknown; phase?: unknown; sessionKey?: unknown }
+      | undefined;
     void loadSessions(host as unknown as OpenClawApp);
+    if (typeof payload?.sessionKey === "string" && payload.sessionKey === host.sessionKey) {
+      const phase = typeof payload.phase === "string" ? payload.phase : null;
+      if (phase === "start") {
+        markChatActivity(host, "后台会话已启动");
+      } else if (phase === "end") {
+        markChatActivity(host, "后台会话已完成");
+      } else if (phase === "error") {
+        markChatActivity(host, "后台会话报错");
+      } else {
+        markChatActivity(host, "后台会话有新活动");
+      }
+    }
+    if (recoverChatRunFromTerminalSessionChange(host, payload)) {
+      return;
+    }
+    if (typeof payload?.sessionKey === "string" && payload.sessionKey === host.sessionKey) {
+      if (host.chatRunId) {
+        return;
+      }
+      resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
+      (host as unknown as { chatStream: string | null }).chatStream = null;
+      (host as unknown as { chatStreamStartedAt: number | null }).chatStreamStartedAt = null;
+      host.chatRunId = null;
+      void loadChatHistory(host as unknown as OpenClawApp);
+    }
     return;
   }
 

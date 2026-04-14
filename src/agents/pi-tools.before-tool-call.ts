@@ -95,6 +95,26 @@ function shouldEmitLoopWarning(state: SessionState, warningKey: string, count: n
   return true;
 }
 
+function resolveDirectoryLikeReadPath(params: unknown): string | null {
+  if (!isPlainObject(params)) {
+    return null;
+  }
+  const rawPath =
+    typeof params.path === "string"
+      ? params.path
+      : typeof params.file_path === "string"
+        ? params.file_path
+        : "";
+  const trimmed = rawPath.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed === "." || trimmed === ".." || /[\\/]$/u.test(trimmed)) {
+    return rawPath;
+  }
+  return null;
+}
+
 async function recordLoopOutcome(args: {
   ctx?: HookContext;
   toolName: string;
@@ -134,6 +154,16 @@ export async function runBeforeToolCallHook(args: {
 }): Promise<HookOutcome> {
   const toolName = normalizeToolName(args.toolName || "tool");
   const params = args.params;
+
+  if (toolName === "read") {
+    const directoryLikePath = resolveDirectoryLikeReadPath(params);
+    if (directoryLikePath) {
+      return {
+        blocked: true,
+        reason: `Read blocked: path looks like a directory, not a file: ${directoryLikePath}`,
+      };
+    }
+  }
 
   if (args.ctx?.sessionKey) {
     const { getDiagnosticSessionState, logToolLoopAction, detectToolCallLoop, recordToolCall } =

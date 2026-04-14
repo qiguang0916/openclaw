@@ -9,8 +9,8 @@ This directory contains hooks that ship with OpenClaw. These hooks are automatic
 Automatically saves session context to memory when you issue `/new` or `/reset`.
 
 **Events**: `command:new`, `command:reset`
-**What it does**: Creates a dated memory file with LLM-generated slug based on conversation content.
-**Output**: `<workspace>/memory/YYYY-MM-DD-slug.md` (defaults to `~/.openclaw/workspace`)
+**What it does**: Writes session context to the active memory backend. With `mempalace-memory` active, it files into MemPalace first; file-backed workspace memory is now only a compatibility fallback.
+**Output**: Primary path = MemPalace. Compatibility fallback = `<workspace>/memory/YYYY-MM-DD-slug.md` (defaults to `~/.openclaw/workspace`)
 
 **Enable**:
 

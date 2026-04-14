@@ -3,9 +3,9 @@
   "kind": "memory",
   "uiHints": {
     "dreaming.frequency": {
-      "label": "Dreaming Frequency",
+      "label": "Legacy Dreaming Frequency",
       "placeholder": "0 3 * * *",
-      "help": "Optional cron cadence for the full dreaming sweep (light, REM, then deep)."
+      "help": "Optional cron cadence for the legacy file-backed dreaming sweep. Prefer MemPalace-native dreaming when `mempalace-memory` owns the active memory slot."
     }
   },
   "configSchema": {

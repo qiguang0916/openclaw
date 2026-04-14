@@ -81,6 +81,11 @@ import { createPreparedEmbeddedPiSettingsManager } from "../../pi-project-settin
 import { applyPiAutoCompactionGuard } from "../../pi-settings.js";
 import { toClientToolDefinitions } from "../../pi-tool-definition-adapter.js";
 import { createOpenClawCodingTools, resolveToolLoopDetectionConfig } from "../../pi-tools.js";
+import {
+  isToolAllowedByPolicies,
+  resolveEffectiveToolPolicy,
+  resolveGroupToolPolicy,
+} from "../../pi-tools.policy.js";
 import { registerProviderStreamForModel } from "../../provider-stream.js";
 import { resolveSandboxContext } from "../../sandbox.js";
 import { resolveSandboxRuntimeStatus } from "../../sandbox/runtime-status.js";
@@ -100,6 +105,7 @@ import {
 import { buildSystemPromptParams } from "../../system-prompt-params.js";
 import { buildSystemPromptReport } from "../../system-prompt-report.js";
 import { sanitizeToolCallIdsForCloudCodeAssist } from "../../tool-call-id.js";
+import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../../tool-policy.js";
 import { resolveTranscriptPolicy } from "../../transcript-policy.js";
 import { DEFAULT_BOOTSTRAP_FILENAME } from "../../workspace.js";
 import { isRunnerAbortError } from "../abort.js";
@@ -456,6 +462,57 @@ export async function runEmbeddedAttempt(
     let yieldAbortSettled: Promise<void> | null = null;
     // Check if the model supports native image input
     const modelHasVision = params.model.input?.includes("image") ?? false;
+    const effectiveToolPolicy = resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      agentId: sessionAgentId,
+      modelProvider: params.model.provider,
+      modelId: params.modelId,
+    });
+    const groupToolPolicy = resolveGroupToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      spawnedBy: params.spawnedBy,
+      messageProvider: params.messageChannel ?? params.messageProvider,
+      groupId: params.groupId,
+      groupChannel: params.groupChannel,
+      groupSpace: params.groupSpace,
+      accountId: params.agentAccountId,
+      senderId: params.senderId,
+      senderName: params.senderName,
+      senderUsername: params.senderUsername,
+      senderE164: params.senderE164,
+    });
+    const profilePolicy = mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(effectiveToolPolicy.profile),
+      effectiveToolPolicy.profileAlsoAllow,
+    );
+    const providerProfilePolicy = mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(effectiveToolPolicy.providerProfile),
+      effectiveToolPolicy.providerProfileAlsoAllow,
+    );
+    const policyFilters = [
+      profilePolicy,
+      providerProfilePolicy,
+      effectiveToolPolicy.globalPolicy,
+      effectiveToolPolicy.globalProviderPolicy,
+      effectiveToolPolicy.agentPolicy,
+      effectiveToolPolicy.agentProviderPolicy,
+      groupToolPolicy,
+      sandbox?.tools,
+    ];
+    const filterAllowedTools = <TTool extends { name: string }>(tools: TTool[]): TTool[] => {
+      const allowedByRun = Array.isArray(params.toolsAllow)
+        ? new Set(params.toolsAllow)
+        : undefined;
+      return tools.filter((tool) => {
+        if (allowedByRun && !allowedByRun.has(tool.name)) {
+          return false;
+        }
+        return isToolAllowedByPolicies(tool.name, policyFilters);
+      });
+    };
+
     const toolsRaw = params.disableTools
       ? []
       : (() => {
@@ -517,11 +574,7 @@ export async function runEmbeddedAttempt(
               abortSessionForYield?.();
             },
           });
-          if (params.toolsAllow && params.toolsAllow.length > 0) {
-            const allowSet = new Set(params.toolsAllow);
-            return allTools.filter((tool) => allowSet.has(tool.name));
-          }
-          return allTools;
+          return filterAllowedTools(allTools);
         })();
     const toolsEnabled = supportsModelTools(params.model);
     const tools = normalizeProviderToolSchemas({
@@ -565,8 +618,8 @@ export async function runEmbeddedAttempt(
       : undefined;
     const effectiveTools = [
       ...tools,
-      ...(bundleMcpRuntime?.tools ?? []),
-      ...(bundleLspRuntime?.tools ?? []),
+      ...filterAllowedTools(bundleMcpRuntime?.tools ?? []),
+      ...filterAllowedTools(bundleLspRuntime?.tools ?? []),
     ];
     const allowedToolNames = collectAllowedToolNames({
       tools: effectiveTools,
@@ -683,8 +736,9 @@ export async function runEmbeddedAttempt(
     const promptMode = resolvePromptModeForSession(params.sessionKey);
 
     // When toolsAllow is set, use minimal prompt and strip skills catalog
-    const effectivePromptMode = params.toolsAllow?.length ? ("minimal" as const) : promptMode;
-    const effectiveSkillsPrompt = params.toolsAllow?.length ? undefined : skillsPrompt;
+    const hasRunToolAllow = Array.isArray(params.toolsAllow);
+    const effectivePromptMode = hasRunToolAllow ? ("minimal" as const) : promptMode;
+    const effectiveSkillsPrompt = hasRunToolAllow ? undefined : skillsPrompt;
     const docsPath = await resolveOpenClawDocsPath({
       workspaceDir: effectiveWorkspace,
       argv1: process.argv[1],

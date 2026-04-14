@@ -142,6 +142,10 @@ export type GetReplyOptions = {
   blockReplyTimeoutMs?: number;
   /** If provided, only load these skills for this session (empty = no skills). */
   skillFilter?: string[];
+  /** If provided, restrict this run to exactly these tools (empty = no tools). */
+  toolsAllow?: string[];
+  /** Force-disable tools for this run. */
+  disableTools?: boolean;
   /** Mutable ref to track if a reply was sent (for Slack "first" threading mode). */
   hasRepliedRef?: { value: boolean };
   /** Override agent timeout in seconds (0 = no timeout). Threads through to resolveAgentTimeoutMs. */

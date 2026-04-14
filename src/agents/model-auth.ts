@@ -690,7 +690,9 @@ export function applyAuthHeaderOverride<T extends Model<Api>>(
     return model;
   }
   const providerConfig = resolveProviderConfig(cfg, model.provider);
-  if (!providerConfig?.authHeader) {
+  const modelAuthHeader = (model as Model<Api> & { authHeader?: boolean }).authHeader === true;
+  const shouldInjectAuthHeader = providerConfig?.authHeader ?? modelAuthHeader;
+  if (!shouldInjectAuthHeader) {
     return model;
   }
 

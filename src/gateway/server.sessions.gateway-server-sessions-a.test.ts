@@ -2367,6 +2367,31 @@ describe("gateway server sessions", () => {
     ws.close();
   });
 
+  test("sessions.reset can skip lifecycle hooks for fast UI resets", async () => {
+    const { dir } = await createSessionStoreDir();
+    await writeSingleLineSession(dir, "sess-main", "hello");
+
+    await writeSessionStore({
+      entries: {
+        main: { sessionId: "sess-main", updatedAt: Date.now() },
+      },
+    });
+    beforeResetHookState.hasBeforeResetHook = true;
+
+    const { ws } = await openClient();
+    const reset = await rpcReq<{ ok: true; key: string }>(ws, "sessions.reset", {
+      key: "main",
+      emitLifecycleHooks: false,
+    });
+
+    expect(reset.ok).toBe(true);
+    expect(sessionHookMocks.triggerInternalHook).not.toHaveBeenCalled();
+    expect(beforeResetHookMocks.runBeforeReset).not.toHaveBeenCalled();
+    expect(sessionLifecycleHookMocks.runSessionEnd).not.toHaveBeenCalled();
+    expect(sessionLifecycleHookMocks.runSessionStart).not.toHaveBeenCalled();
+    ws.close();
+  });
+
   test("sessions.reset emits before_reset hook with transcript context", async () => {
     const { dir } = await createSessionStoreDir();
     const transcriptPath = path.join(dir, "sess-main.jsonl");

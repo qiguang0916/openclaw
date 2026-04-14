@@ -140,4 +140,19 @@ describe("abortChatRunById", () => {
       }),
     );
   });
+
+  it("removes the mapped agent run when aborting a chat client run", () => {
+    const runId = "client-run-1";
+    const sessionKey = "main";
+    const entry = {
+      ...createActiveEntry(sessionKey),
+      agentRunId: "agent-run-1",
+    };
+    const ops = createOps({ runId, entry, buffer: "partial" });
+
+    const result = abortChatRunById(ops, { runId, sessionKey });
+
+    expect(result).toEqual({ aborted: true });
+    expect(ops.removeChatRun).toHaveBeenCalledWith("agent-run-1", "client-run-1", sessionKey);
+  });
 });

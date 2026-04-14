@@ -6,6 +6,7 @@ export type ChatAbortControllerEntry = {
   sessionKey: string;
   startedAtMs: number;
   expiresAtMs: number;
+  agentRunId?: string;
   ownerConnId?: string;
   ownerDeviceId?: string;
 };
@@ -98,7 +99,7 @@ export function abortChatRunById(
   ops.chatRunBuffers.delete(runId);
   ops.chatDeltaSentAt.delete(runId);
   ops.chatDeltaLastBroadcastLen.delete(runId);
-  const removed = ops.removeChatRun(runId, runId, sessionKey);
+  const removed = ops.removeChatRun(active.agentRunId ?? runId, runId, sessionKey);
   broadcastChatAborted(ops, { runId, sessionKey, stopReason, partialText });
   ops.agentRunSeq.delete(runId);
   if (removed?.clientRunId) {

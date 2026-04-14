@@ -32,6 +32,7 @@ type RemDreamingStatus = DreamingPhaseStatusBase & {
 };
 
 export type DreamingStatus = {
+  backend?: "memory-core" | "mempalace-memory";
   enabled: boolean;
   timezone?: string;
   verboseLogging: boolean;
@@ -50,6 +51,31 @@ export type DreamingStatus = {
   phaseSignalPath?: string;
   storeError?: string;
   phaseSignalError?: string;
+  cron?: string;
+  lookbackDays?: number;
+  limit?: number;
+  kgThemes?: number;
+  lastRunAt?: string;
+  lastRunPhases?: string[];
+  lastRunLineCount?: number;
+  recentRecallQueryCount?: number;
+  lastKgFactCount?: number;
+  lastVerifiedKgFacts?: number;
+  lastKgFacts?: Array<{
+    subject: string;
+    predicate: string;
+    object: string;
+    validFrom?: string | null;
+    sourceFile?: string | null;
+  }>;
+  lastDrawer?: {
+    wing?: string;
+    room?: string;
+    drawerId?: string;
+    text?: string;
+    sourceFile?: string | null;
+    verified: boolean;
+  };
   phases: {
     light: LightDreamingStatus;
     deep: DeepDreamingStatus;
@@ -65,6 +91,7 @@ type DoctorMemoryDreamDiaryPayload = {
   found?: unknown;
   path?: unknown;
   content?: unknown;
+  source?: unknown;
 };
 
 export type DreamingState = {
@@ -80,6 +107,7 @@ export type DreamingState = {
   dreamDiaryError: string | null;
   dreamDiaryPath: string | null;
   dreamDiaryContent: string | null;
+  dreamDiarySource?: string | null;
   lastError: string | null;
 };
 
@@ -153,26 +181,116 @@ function normalizeDreamingStatus(raw: unknown): DreamingStatus | null {
   const phaseSignalPath = normalizeTrimmedString(record.phaseSignalPath);
   const storeError = normalizeTrimmedString(record.storeError);
   const phaseSignalError = normalizeTrimmedString(record.phaseSignalError);
+  const backend = normalizeTrimmedString(record.backend);
+  const cron = normalizeTrimmedString(record.cron);
+  const lastRunAt = normalizeTrimmedString(record.lastRunAt);
+  const recentRecallQueryCount =
+    typeof record.recentRecallQueryCount === "number"
+      ? normalizeFiniteInt(record.recentRecallQueryCount, 0)
+      : undefined;
+  const lastRunLineCount =
+    typeof record.lastRunLineCount === "number"
+      ? normalizeFiniteInt(record.lastRunLineCount, 0)
+      : undefined;
+  const lastKgFactCount =
+    typeof record.lastKgFactCount === "number"
+      ? normalizeFiniteInt(record.lastKgFactCount, 0)
+      : undefined;
+  const lastVerifiedKgFacts =
+    typeof record.lastVerifiedKgFacts === "number"
+      ? normalizeFiniteInt(record.lastVerifiedKgFacts, 0)
+      : undefined;
+  const lastRunPhases = Array.isArray(record.lastRunPhases)
+    ? record.lastRunPhases.filter(
+        (value): value is string => typeof value === "string" && value.trim().length > 0,
+      )
+    : undefined;
+  const lastKgFacts = Array.isArray(record.lastKgFacts)
+    ? record.lastKgFacts.flatMap((entry) => {
+        const fact = asRecord(entry);
+        if (!fact) {
+          return [];
+        }
+        const subject = normalizeTrimmedString(fact.subject);
+        const predicate = normalizeTrimmedString(fact.predicate);
+        const object = normalizeTrimmedString(fact.object);
+        if (!subject || !predicate || !object) {
+          return [];
+        }
+        return [
+          {
+            subject,
+            predicate,
+            object,
+            ...(normalizeTrimmedString(fact.validFrom)
+              ? { validFrom: normalizeTrimmedString(fact.validFrom) }
+              : {}),
+            ...(normalizeTrimmedString(fact.sourceFile)
+              ? { sourceFile: normalizeTrimmedString(fact.sourceFile) }
+              : {}),
+          },
+        ];
+      })
+    : undefined;
+  const lastDrawerRecord = asRecord(record.lastDrawer);
 
   return {
+    ...(backend === "memory-core" || backend === "mempalace-memory" ? { backend } : {}),
     enabled: normalizeBoolean(record.enabled, false),
     ...(timezone ? { timezone } : {}),
     verboseLogging: normalizeBoolean(record.verboseLogging, false),
     storageMode: normalizeStorageMode(record.storageMode),
     separateReports: normalizeBoolean(record.separateReports, false),
-    shortTermCount: normalizeFiniteInt(record.shortTermCount, 0),
+    shortTermCount: normalizeFiniteInt(record.shortTermCount, recentRecallQueryCount ?? 0),
     recallSignalCount: normalizeFiniteInt(record.recallSignalCount, 0),
     dailySignalCount: normalizeFiniteInt(record.dailySignalCount, 0),
-    totalSignalCount: normalizeFiniteInt(record.totalSignalCount, 0),
-    phaseSignalCount: normalizeFiniteInt(record.phaseSignalCount, 0),
+    totalSignalCount: normalizeFiniteInt(record.totalSignalCount, lastRunLineCount ?? 0),
+    phaseSignalCount: normalizeFiniteInt(record.phaseSignalCount, lastVerifiedKgFacts ?? 0),
     lightPhaseHitCount: normalizeFiniteInt(record.lightPhaseHitCount, 0),
     remPhaseHitCount: normalizeFiniteInt(record.remPhaseHitCount, 0),
-    promotedTotal: normalizeFiniteInt(record.promotedTotal, 0),
-    promotedToday: normalizeFiniteInt(record.promotedToday, 0),
+    promotedTotal: normalizeFiniteInt(record.promotedTotal, lastKgFactCount ?? 0),
+    promotedToday: normalizeFiniteInt(record.promotedToday, lastKgFactCount ?? 0),
     ...(storePath ? { storePath } : {}),
     ...(phaseSignalPath ? { phaseSignalPath } : {}),
     ...(storeError ? { storeError } : {}),
     ...(phaseSignalError ? { phaseSignalError } : {}),
+    ...(cron ? { cron } : {}),
+    ...(typeof record.lookbackDays === "number"
+      ? { lookbackDays: normalizeFiniteInt(record.lookbackDays, 0) }
+      : {}),
+    ...(typeof record.limit === "number" ? { limit: normalizeFiniteInt(record.limit, 0) } : {}),
+    ...(typeof record.kgThemes === "number"
+      ? { kgThemes: normalizeFiniteInt(record.kgThemes, 0) }
+      : {}),
+    ...(lastRunAt ? { lastRunAt } : {}),
+    ...(lastRunPhases && lastRunPhases.length > 0 ? { lastRunPhases } : {}),
+    ...(lastRunLineCount !== undefined ? { lastRunLineCount } : {}),
+    ...(recentRecallQueryCount !== undefined ? { recentRecallQueryCount } : {}),
+    ...(lastKgFactCount !== undefined ? { lastKgFactCount } : {}),
+    ...(lastVerifiedKgFacts !== undefined ? { lastVerifiedKgFacts } : {}),
+    ...(lastKgFacts && lastKgFacts.length > 0 ? { lastKgFacts } : {}),
+    ...(lastDrawerRecord
+      ? {
+          lastDrawer: {
+            ...(normalizeTrimmedString(lastDrawerRecord.wing)
+              ? { wing: normalizeTrimmedString(lastDrawerRecord.wing) }
+              : {}),
+            ...(normalizeTrimmedString(lastDrawerRecord.room)
+              ? { room: normalizeTrimmedString(lastDrawerRecord.room) }
+              : {}),
+            ...(normalizeTrimmedString(lastDrawerRecord.drawerId)
+              ? { drawerId: normalizeTrimmedString(lastDrawerRecord.drawerId) }
+              : {}),
+            ...(normalizeTrimmedString(lastDrawerRecord.text)
+              ? { text: normalizeTrimmedString(lastDrawerRecord.text) }
+              : {}),
+            ...(normalizeTrimmedString(lastDrawerRecord.sourceFile)
+              ? { sourceFile: normalizeTrimmedString(lastDrawerRecord.sourceFile) }
+              : {}),
+            verified: normalizeBoolean(lastDrawerRecord.verified, false),
+          },
+        }
+      : {}),
     phases: {
       light: {
         ...normalizePhaseStatusBase(lightRecord),
@@ -225,6 +343,7 @@ export async function loadDreamDiary(state: DreamingState): Promise<void> {
   }
   state.dreamDiaryLoading = true;
   state.dreamDiaryError = null;
+  state.dreamDiarySource = null;
   try {
     const payload = await state.client.request<DoctorMemoryDreamDiaryPayload>(
       "doctor.memory.dreamDiary",
@@ -235,9 +354,11 @@ export async function loadDreamDiary(state: DreamingState): Promise<void> {
     if (found) {
       state.dreamDiaryPath = path;
       state.dreamDiaryContent = typeof payload?.content === "string" ? payload.content : "";
+      state.dreamDiarySource = normalizeTrimmedString(payload?.source) ?? null;
     } else {
       state.dreamDiaryPath = path;
       state.dreamDiaryContent = null;
+      state.dreamDiarySource = normalizeTrimmedString(payload?.source) ?? null;
     }
   } catch (err) {
     state.dreamDiaryError = String(err);
@@ -286,10 +407,12 @@ export async function updateDreamingEnabled(
   state: DreamingState,
   enabled: boolean,
 ): Promise<boolean> {
+  const targetPluginId =
+    state.dreamingStatus?.backend === "mempalace-memory" ? "mempalace-memory" : "memory-core";
   const ok = await writeDreamingPatch(state, {
     plugins: {
       entries: {
-        "memory-core": {
+        [targetPluginId]: {
           config: {
             dreaming: {
               enabled,

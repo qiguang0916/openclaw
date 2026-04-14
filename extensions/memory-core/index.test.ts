@@ -6,6 +6,7 @@ import {
   DEFAULT_MEMORY_FLUSH_FORCE_TRANSCRIPT_BYTES,
   DEFAULT_MEMORY_FLUSH_PROMPT,
   DEFAULT_MEMORY_FLUSH_SOFT_TOKENS,
+  shouldRegisterLegacyDreaming,
 } from "./index.js";
 
 describe("buildPromptSection", () => {
@@ -176,5 +177,35 @@ describe("buildMemoryFlushPlan", () => {
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("do not overwrite");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("timestamped variant");
     expect(DEFAULT_MEMORY_FLUSH_PROMPT).toContain("YYYY-MM-DD.md");
+  });
+});
+
+describe("shouldRegisterLegacyDreaming", () => {
+  it("keeps legacy dreaming enabled when no explicit memory slot is selected", () => {
+    expect(shouldRegisterLegacyDreaming({})).toBe(true);
+  });
+
+  it("keeps legacy dreaming enabled when memory-core owns the slot", () => {
+    expect(
+      shouldRegisterLegacyDreaming({
+        plugins: {
+          slots: {
+            memory: "memory-core",
+          },
+        },
+      } as OpenClawConfig),
+    ).toBe(true);
+  });
+
+  it("disables legacy dreaming when mempalace-memory owns the slot", () => {
+    expect(
+      shouldRegisterLegacyDreaming({
+        plugins: {
+          slots: {
+            memory: "mempalace-memory",
+          },
+        },
+      } as OpenClawConfig),
+    ).toBe(false);
   });
 });

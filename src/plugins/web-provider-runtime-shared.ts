@@ -160,7 +160,7 @@ export function resolvePluginWebProviders<TEntry>(
     bundledAllowlistCompat: params.bundledAllowlistCompat,
     onlyPluginIds: params.onlyPluginIds,
     origin: params.origin,
-    envKey: buildPluginSnapshotCacheEnvKey(env),
+    envKey: JSON.stringify(buildPluginSnapshotCacheEnvKey(env)),
   });
   if (cacheOwnerConfig && shouldMemoizeSnapshot) {
     const configCache = deps.snapshotCache.get(cacheOwnerConfig);

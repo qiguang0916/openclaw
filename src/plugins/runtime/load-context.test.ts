@@ -2,8 +2,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const loadConfigMock = vi.fn();
 const applyPluginAutoEnableMock = vi.fn();
-const resolveAgentWorkspaceDirMock = vi.fn(() => "/resolved-workspace");
-const resolveDefaultAgentIdMock = vi.fn(() => "default");
+const resolveAgentWorkspaceDirMock = vi.fn((..._args: unknown[]) => "/resolved-workspace");
+const resolveDefaultAgentIdMock = vi.fn((..._args: unknown[]) => "default");
 
 let resolvePluginRuntimeLoadContext: typeof import("./load-context.js").resolvePluginRuntimeLoadContext;
 let buildPluginRuntimeLoadOptions: typeof import("./load-context.js").buildPluginRuntimeLoadOptions;

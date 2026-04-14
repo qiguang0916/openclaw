@@ -711,6 +711,67 @@
         "lines"
       ]
     },
+    "memory_write": {
+      "emoji": "🗄️",
+      "title": "Memory Write",
+      "detailKeys": [
+        "content",
+        "category",
+        "room",
+        "source"
+      ]
+    },
+    "memory_kg_query": {
+      "emoji": "🕸️",
+      "title": "Memory KG Query",
+      "detailKeys": [
+        "query",
+        "entity",
+        "relation",
+        "object",
+        "limit"
+      ]
+    },
+    "memory_stats": {
+      "emoji": "📊",
+      "title": "Memory Stats",
+      "detailKeys": []
+    },
+    "memory_update": {
+      "emoji": "🛠️",
+      "title": "Memory Update",
+      "detailKeys": [
+        "path"
+      ]
+    },
+    "memory_delete": {
+      "emoji": "🗑️",
+      "title": "Memory Delete",
+      "detailKeys": [
+        "path",
+        "hard"
+      ]
+    },
+    "memory_export": {
+      "emoji": "📦",
+      "title": "Memory Export",
+      "detailKeys": [
+        "scope",
+        "maxDrawers",
+        "maxTriples",
+        "outputPath"
+      ]
+    },
+    "memory_import": {
+      "emoji": "📥",
+      "title": "Memory Import",
+      "detailKeys": [
+        "inputPath",
+        "targetScope",
+        "dedupe",
+        "overwrite"
+      ]
+    },
     "web_search": {
       "emoji": "🔎",
       "title": "Web Search",

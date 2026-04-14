@@ -1,15 +1,17 @@
 ---
 title: "Builtin Memory Engine"
-summary: "The default SQLite-based memory backend with keyword, vector, and hybrid search"
+summary: "Legacy SQLite-based compatibility backend with keyword, vector, and hybrid search"
 read_when:
-  - You want to understand the default memory backend
+  - You want to understand the legacy builtin memory backend
   - You want to configure embedding providers or hybrid search
 ---
 
 # Builtin Memory Engine
 
-The builtin engine is the default memory backend. It stores your memory index in
-a per-agent SQLite database and needs no extra dependencies to get started.
+The builtin engine is the legacy file-backed SQLite memory backend used by
+`memory-core`. In deployments where `mempalace-memory` owns the active memory
+slot, this is no longer the practical primary memory path, but it remains the
+main compatibility backend for legacy file memory.
 
 ## What it provides
 
@@ -56,8 +58,9 @@ order shown. Set `memorySearch.provider` to override.
 
 ## How indexing works
 
-OpenClaw indexes `MEMORY.md` and `memory/*.md` into chunks (~400 tokens with
-80-token overlap) and stores them in a per-agent SQLite database.
+OpenClaw indexes `MEMORY.md` and `memory/*.md` from the legacy file-backed lane
+into chunks (~400 tokens with 80-token overlap) and stores them in a per-agent
+SQLite database.
 
 - **Index location:** `~/.openclaw/memory/<agentId>.sqlite`
 - **File watching:** changes to memory files trigger a debounced reindex (1.5s).
@@ -73,7 +76,8 @@ You can also index Markdown files outside the workspace with
 
 ## When to use
 
-The builtin engine is the right choice for most users:
+The builtin engine is the right choice when you intentionally want the legacy
+file-backed memory path:
 
 - Works out of the box with no extra dependencies.
 - Handles keyword and vector search well.

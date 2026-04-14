@@ -15,34 +15,65 @@ import { ChatState, loadChatHistory } from "./controllers/chat.ts";
 import { loadSessions } from "./controllers/sessions.ts";
 import { icons } from "./icons.ts";
 import { iconForTab, pathForTab, titleForTab, type Tab } from "./navigation.ts";
-import { parseAgentSessionKey } from "./session-key.ts";
+import { buildAgentMainSessionKey, normalizeMainKey, parseAgentSessionKey } from "./session-key.ts";
 import type { ThemeTransitionContext } from "./theme-transition.ts";
 import type { ThemeMode, ThemeName } from "./theme.ts";
 import {
+  isBinaryThinkingProvider,
   listThinkingLevelLabels,
   normalizeThinkLevel,
   resolveThinkingDefaultForModel,
 } from "./thinking.ts";
-import type { SessionsListResult } from "./types.ts";
+import type { ModelCatalogEntry, SessionsListResult } from "./types.ts";
 
 type SessionDefaultsSnapshot = {
   mainSessionKey?: string;
   mainKey?: string;
 };
 
-function resolveSidebarChatSessionKey(state: AppViewState): string {
+const DEFAULT_JARVIS_CHAT_SESSION_KEY = "agent:openclaw-optimizer:main";
+const CHAT_AGENT_PINNED_ORDER = [
+  "openclaw-optimizer",
+  "pub-chief",
+  "dy-chief",
+  "comic-team-lead",
+  "dev-lead",
+  "ai-content-workflow",
+] as const;
+const CHAT_AGENT_PINNED_IDS = new Set<string>(CHAT_AGENT_PINNED_ORDER);
+const CHAT_AGENT_PINNED_RANK = new Map<string, number>(
+  CHAT_AGENT_PINNED_ORDER.map((id, index) => [id, index] as const),
+);
+
+function resolveChatMainKey(state: AppViewState): string {
   const snapshot = state.hello?.snapshot as
     | { sessionDefaults?: SessionDefaultsSnapshot }
     | undefined;
-  const mainSessionKey = snapshot?.sessionDefaults?.mainSessionKey?.trim();
-  if (mainSessionKey) {
-    return mainSessionKey;
+  return normalizeMainKey(state.agentsList?.mainKey ?? snapshot?.sessionDefaults?.mainKey);
+}
+
+function isVisibleChatMainSessionKey(state: AppViewState, sessionKey: string | undefined | null) {
+  const parsed = parseAgentSessionKey(sessionKey);
+  if (!parsed || parsed.rest.trim().toLowerCase() !== resolveChatMainKey(state)) {
+    return false;
   }
-  const mainKey = snapshot?.sessionDefaults?.mainKey?.trim();
-  if (mainKey) {
-    return mainKey;
+  const agentId = parsed.agentId.trim().toLowerCase();
+  if (CHAT_AGENT_PINNED_IDS.has(agentId)) {
+    return true;
   }
-  return "main";
+  return resolveChatVisibleAgents(state.agentsList?.agents ?? []).some(
+    (agent) => agent.id.trim().toLowerCase() === agentId,
+  );
+}
+
+function resolveSidebarChatSessionKey(state: AppViewState): string {
+  const candidates = [state.settings.lastLeadChatSessionKey, DEFAULT_JARVIS_CHAT_SESSION_KEY];
+  for (const candidate of candidates) {
+    if (isVisibleChatMainSessionKey(state, candidate)) {
+      return candidate!.trim();
+    }
+  }
+  return DEFAULT_JARVIS_CHAT_SESSION_KEY;
 }
 
 function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string) {
@@ -53,10 +84,12 @@ function resetChatStateForSessionSwitch(state: AppViewState, sessionKey: string)
   state.chatRunId = null;
   (state as unknown as OpenClawApp).resetToolStream();
   (state as unknown as OpenClawApp).resetChatScroll();
+  const isLeadChatSession = isVisibleChatMainSessionKey(state, sessionKey);
   state.applySettings({
     ...state.settings,
     sessionKey,
     lastActiveSessionKey: sessionKey,
+    ...(isLeadChatSession ? { lastLeadChatSessionKey: sessionKey } : {}),
   });
 }
 
@@ -145,6 +178,7 @@ export function renderChatSessionSelect(state: AppViewState) {
   return html`
     <div class="chat-controls__session-row">
       <label class="field chat-controls__session">
+        <span class="chat-controls__label">负责人</span>
         <select
           .value=${state.sessionKey}
           title=${selectedSessionLabel}
@@ -549,6 +583,7 @@ function renderChatModelSelect(state: AppViewState) {
       : (options.find((entry) => entry.value === currentOverride)?.label ?? currentOverride);
   return html`
     <label class="field chat-controls__session chat-controls__model">
+      <span class="chat-controls__label">模型</span>
       <select
         data-chat-model-select="true"
         aria-label="Chat model"
@@ -581,18 +616,105 @@ type ChatThinkingSelectOption = {
 type ChatThinkingSelectState = {
   currentOverride: string;
   defaultLabel: string;
+  disabledReason?: string;
   options: ChatThinkingSelectOption[];
 };
+
+export type ChatComposerStatus = {
+  owner: string;
+  model: string;
+  thinking: string;
+};
+
+type ChatThinkingTargetModel = {
+  provider: string | null;
+  model: string | null;
+  catalogEntry?: ModelCatalogEntry;
+};
+
+function splitChatModelValue(value: string): { provider: string | null; model: string | null } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { provider: null, model: null };
+  }
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex <= 0) {
+    return { provider: null, model: trimmed };
+  }
+  return {
+    provider: trimmed.slice(0, slashIndex),
+    model: trimmed.slice(slashIndex + 1),
+  };
+}
+
+function findChatModelCatalogEntry(
+  catalog: ModelCatalogEntry[],
+  provider: string | null,
+  model: string | null,
+): ModelCatalogEntry | undefined {
+  const modelKey = model?.trim().toLowerCase();
+  if (!modelKey) {
+    return undefined;
+  }
+  const providerKey = provider?.trim().toLowerCase();
+  return catalog.find((entry) => {
+    if (entry.id.trim().toLowerCase() !== modelKey) {
+      return false;
+    }
+    if (!providerKey) {
+      return true;
+    }
+    return entry.provider.trim().toLowerCase() === providerKey;
+  });
+}
 
 function resolveThinkingTargetModel(state: AppViewState): {
   provider: string | null;
   model: string | null;
 } {
-  const activeRow = state.sessionsResult?.sessions?.find((row) => row.key === state.sessionKey);
+  const { currentOverride, defaultModel } = resolveChatModelSelectState(state);
+  const selectedModel = currentOverride || defaultModel;
+  const parsed = splitChatModelValue(selectedModel);
+  const catalogEntry = findChatModelCatalogEntry(
+    state.chatModelCatalog ?? [],
+    parsed.provider,
+    parsed.model,
+  );
   return {
-    provider: activeRow?.modelProvider ?? state.sessionsResult?.defaults?.modelProvider ?? null,
-    model: activeRow?.model ?? state.sessionsResult?.defaults?.model ?? null,
+    provider: parsed.provider ?? catalogEntry?.provider ?? null,
+    model: parsed.model ?? catalogEntry?.id ?? null,
   };
+}
+
+function resolveChatThinkingTargetModel(state: AppViewState): ChatThinkingTargetModel {
+  const { provider, model } = resolveThinkingTargetModel(state);
+  return {
+    provider,
+    model,
+    catalogEntry: findChatModelCatalogEntry(state.chatModelCatalog ?? [], provider, model),
+  };
+}
+
+function modelSupportsChatThinking(
+  target: ChatThinkingTargetModel,
+  catalog: ModelCatalogEntry[],
+): boolean {
+  if (!target.provider || !target.model) {
+    return false;
+  }
+  if (isBinaryThinkingProvider(target.provider)) {
+    return true;
+  }
+  if (target.catalogEntry?.reasoning === true) {
+    return true;
+  }
+  return (
+    resolveThinkingDefaultForModel({
+      provider: target.provider,
+      model: target.model,
+      catalog,
+    }) !== "off"
+  );
 }
 
 function buildThinkingOptions(
@@ -624,7 +746,7 @@ function buildThinkingOptions(
     });
   };
 
-  for (const label of listThinkingLevelLabels(provider)) {
+  for (const label of listThinkingLevelLabels(provider, model)) {
     const normalized = normalizeThinkLevel(label) ?? label.trim().toLowerCase();
     addOption(normalized);
   }
@@ -641,7 +763,17 @@ function resolveChatThinkingSelectState(state: AppViewState): ChatThinkingSelect
     typeof persisted === "string" && persisted.trim()
       ? (normalizeThinkLevel(persisted) ?? persisted.trim())
       : "";
-  const { provider, model } = resolveThinkingTargetModel(state);
+  const target = resolveChatThinkingTargetModel(state);
+  const { provider, model } = target;
+  const supportsThinking = modelSupportsChatThinking(target, state.chatModelCatalog ?? []);
+  if (!supportsThinking) {
+    return {
+      currentOverride: "",
+      defaultLabel: "Off",
+      disabledReason: "Thinking is not supported by the selected model.",
+      options: [],
+    };
+  }
   const defaultLevel =
     provider && model
       ? resolveThinkingDefaultForModel({
@@ -658,20 +790,22 @@ function resolveChatThinkingSelectState(state: AppViewState): ChatThinkingSelect
 }
 
 function renderChatThinkingSelect(state: AppViewState) {
-  const { currentOverride, defaultLabel, options } = resolveChatThinkingSelectState(state);
+  const { currentOverride, defaultLabel, disabledReason, options } =
+    resolveChatThinkingSelectState(state);
   const busy =
     state.chatLoading || state.chatSending || Boolean(state.chatRunId) || state.chatStream !== null;
-  const disabled = !state.connected || busy || !state.client;
+  const disabled = !state.connected || busy || !state.client || Boolean(disabledReason);
   const selectedLabel =
     currentOverride === ""
       ? defaultLabel
       : (options.find((entry) => entry.value === currentOverride)?.label ?? currentOverride);
   return html`
     <label class="field chat-controls__session chat-controls__thinking-select">
+      <span class="chat-controls__label">思考</span>
       <select
         data-chat-thinking-select="true"
         aria-label="Chat thinking level"
-        title=${selectedLabel}
+        title=${disabledReason ?? selectedLabel}
         ?disabled=${disabled}
         @change=${async (e: Event) => {
           const next = (e.target as HTMLSelectElement).value.trim();
@@ -692,6 +826,29 @@ function renderChatThinkingSelect(state: AppViewState) {
   `;
 }
 
+export function resolveChatComposerStatus(state: AppViewState): ChatComposerStatus {
+  const sessionGroups = resolveSessionOptionGroups(state, state.sessionKey, state.sessionsResult);
+  const owner =
+    sessionGroups.flatMap((group) => group.options).find((entry) => entry.key === state.sessionKey)
+      ?.label ?? resolveSessionDisplayName(state.sessionKey);
+
+  const modelState = resolveChatModelSelectState(state);
+  const model =
+    modelState.currentOverride === ""
+      ? modelState.defaultDisplay || "Default"
+      : (modelState.options.find((entry) => entry.value === modelState.currentOverride)?.label ??
+        modelState.currentOverride);
+
+  const thinkingState = resolveChatThinkingSelectState(state);
+  const thinking =
+    thinkingState.currentOverride === ""
+      ? thinkingState.defaultLabel
+      : (thinkingState.options.find((entry) => entry.value === thinkingState.currentOverride)
+          ?.label ?? thinkingState.currentOverride);
+
+  return { owner, model, thinking };
+}
+
 async function switchChatModel(state: AppViewState, nextModel: string) {
   if (!state.client || !state.connected) {
     return;
@@ -702,22 +859,53 @@ async function switchChatModel(state: AppViewState, nextModel: string) {
   }
   const targetSessionKey = state.sessionKey;
   const prevOverride = state.chatModelOverrides[targetSessionKey];
+  const activeRow = state.sessionsResult?.sessions?.find((row) => row.key === targetSessionKey);
+  const previousThinkingLevel =
+    typeof activeRow?.thinkingLevel === "string" && activeRow.thinkingLevel.trim()
+      ? (normalizeThinkLevel(activeRow.thinkingLevel) ?? activeRow.thinkingLevel.trim())
+      : undefined;
+  const selectedModel = nextModel || resolveChatModelSelectState(state).defaultModel;
+  const parsedSelectedModel = splitChatModelValue(selectedModel);
+  const selectedCatalogEntry = findChatModelCatalogEntry(
+    state.chatModelCatalog ?? [],
+    parsedSelectedModel.provider,
+    parsedSelectedModel.model,
+  );
+  const shouldClearThinking =
+    Boolean(previousThinkingLevel && previousThinkingLevel !== "off") &&
+    !modelSupportsChatThinking(
+      {
+        provider: parsedSelectedModel.provider ?? selectedCatalogEntry?.provider ?? null,
+        model: parsedSelectedModel.model ?? selectedCatalogEntry?.id ?? null,
+        catalogEntry: selectedCatalogEntry,
+      },
+      state.chatModelCatalog ?? [],
+    );
   state.lastError = null;
   // Write the override cache immediately so the picker stays in sync during the RPC round-trip.
   state.chatModelOverrides = {
     ...state.chatModelOverrides,
     [targetSessionKey]: createChatModelOverride(nextModel),
   };
+  if (shouldClearThinking) {
+    patchSessionThinkingLevel(state, targetSessionKey, undefined);
+    state.chatThinkingLevel = null;
+  }
   try {
     await state.client.request("sessions.patch", {
       key: targetSessionKey,
       model: nextModel || null,
+      ...(shouldClearThinking ? { thinkingLevel: null } : {}),
     });
     void refreshVisibleToolsEffectiveForCurrentSession(state);
     await refreshSessionOptions(state);
   } catch (err) {
     // Roll back so the picker reflects the actual server model.
     state.chatModelOverrides = { ...state.chatModelOverrides, [targetSessionKey]: prevOverride };
+    if (shouldClearThinking) {
+      patchSessionThinkingLevel(state, targetSessionKey, previousThinkingLevel);
+      state.chatThinkingLevel = previousThinkingLevel ?? null;
+    }
     state.lastError = `Failed to set model: ${String(err)}`;
   }
 }
@@ -842,6 +1030,13 @@ export function parseSessionKey(key: string): SessionKeyInfo {
     return { prefix: "", fallbackName: `${channelLabel} Group` };
   }
 
+  // ── WebChat agent group sessions (e.g. "webchat:g-agent-openclaw-optimizer-main") ──
+  const webchatAgentMatch = key.match(/^webchat:g-agent-([a-z0-9_-]+)-main$/i);
+  if (webchatAgentMatch) {
+    const agentId = webchatAgentMatch[1];
+    return { prefix: "", fallbackName: agentId };
+  }
+
   // ── Channel-prefixed legacy keys (e.g. "bluebubbles:g-…") ──
   for (const ch of KNOWN_CHANNEL_KEYS) {
     if (key === ch || key.startsWith(`${ch}:`)) {
@@ -910,6 +1105,36 @@ type SessionOptionGroup = {
   options: SessionOptionEntry[];
 };
 
+function isChatLeadAgent(agent: { id: string; name?: string; identity?: { name?: string } }) {
+  const id = agent.id.trim().toLowerCase();
+  if (CHAT_AGENT_PINNED_IDS.has(id)) {
+    return true;
+  }
+  if (id.endsWith("-lead") || id.endsWith("-chief")) {
+    return true;
+  }
+  const label = `${agent.name ?? ""} ${agent.identity?.name ?? ""}`.toLowerCase();
+  return /\blead\b/u.test(label) || /领导|总控/u.test(label);
+}
+
+function resolveChatVisibleAgents(agents: NonNullable<AppViewState["agentsList"]>["agents"] = []) {
+  const curated = agents.filter(isChatLeadAgent);
+  if (curated.length > 0) {
+    return [...curated].toSorted((a, b) => {
+      const aRank =
+        CHAT_AGENT_PINNED_RANK.get(a.id.trim().toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      const bRank =
+        CHAT_AGENT_PINNED_RANK.get(b.id.trim().toLowerCase()) ?? Number.MAX_SAFE_INTEGER;
+      return aRank - bRank;
+    });
+  }
+  return agents.filter((agent) => {
+    const hasStableTopLevelIdentity = Boolean(agent.identity?.name?.trim());
+    const managesSubagents = Boolean(agent.subagentIds?.length);
+    return hasStableTopLevelIdentity || managesSubagents;
+  });
+}
+
 export function resolveSessionOptionGroups(
   state: AppViewState,
   sessionKey: string,
@@ -917,6 +1142,35 @@ export function resolveSessionOptionGroups(
 ): SessionOptionGroup[] {
   const rows = sessions?.sessions ?? [];
   const hideCron = state.sessionsHideCron ?? true;
+  const configuredAgents = state.agentsList?.agents ?? [];
+  const visibleChatAgents = resolveChatVisibleAgents(configuredAgents);
+  const visibleChatAgentIds = new Set(
+    visibleChatAgents.map((agent) => agent.id.trim().toLowerCase()),
+  );
+  const hasCuratedAgents = configuredAgents.some(isChatLeadAgent);
+  const hasPinnedAgentSession = rows.some((row) => {
+    const parsed = parseAgentSessionKey(row.key);
+    return parsed ? CHAT_AGENT_PINNED_IDS.has(parsed.agentId.trim().toLowerCase()) : false;
+  });
+  const shouldFilterAgentSessions = hasCuratedAgents || hasPinnedAgentSession;
+  if (shouldFilterAgentSessions) {
+    for (const id of CHAT_AGENT_PINNED_IDS) {
+      visibleChatAgentIds.add(id);
+    }
+  }
+  const orderedVisibleChatAgentIds = [
+    ...CHAT_AGENT_PINNED_ORDER.filter((id) => visibleChatAgentIds.has(id)),
+    ...[...visibleChatAgentIds].filter((id) => !CHAT_AGENT_PINNED_IDS.has(id)),
+  ];
+  const visibleChatMainKey = normalizeMainKey(state.agentsList?.mainKey);
+  const isVisibleChatMainSession = (key: string) => {
+    const parsed = parseAgentSessionKey(key);
+    return Boolean(
+      parsed &&
+      visibleChatAgentIds.has(parsed.agentId.trim().toLowerCase()) &&
+      parsed.rest.trim().toLowerCase() === visibleChatMainKey,
+    );
+  };
   const byKey = new Map<string, SessionsListResult["sessions"][number]>();
   for (const row of rows) {
     byKey.set(row.key, row);
@@ -961,7 +1215,32 @@ export function resolveSessionOptionGroups(
     });
   };
 
+  for (const agent of visibleChatAgents) {
+    addOption(
+      buildAgentMainSessionKey({
+        agentId: agent.id,
+        mainKey: state.agentsList?.mainKey,
+      }),
+    );
+  }
+  if (shouldFilterAgentSessions) {
+    for (const agentId of orderedVisibleChatAgentIds) {
+      addOption(
+        buildAgentMainSessionKey({
+          agentId,
+          mainKey: state.agentsList?.mainKey,
+        }),
+      );
+    }
+  }
+
   for (const row of rows) {
+    const _parsed = parseAgentSessionKey(row.key);
+    if (shouldFilterAgentSessions) {
+      if (!isVisibleChatMainSession(row.key)) {
+        continue;
+      }
+    }
     if (row.key !== sessionKey && (row.kind === "global" || row.kind === "unknown")) {
       continue;
     }
@@ -970,7 +1249,9 @@ export function resolveSessionOptionGroups(
     }
     addOption(row.key);
   }
-  addOption(sessionKey);
+  if (!shouldFilterAgentSessions || isVisibleChatMainSession(sessionKey)) {
+    addOption(sessionKey);
+  }
 
   for (const group of groups.values()) {
     const counts = new Map<string, number>();

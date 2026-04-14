@@ -381,6 +381,7 @@ export async function performGatewaySessionReset(params: {
   key: string;
   reason: "new" | "reset";
   commandSource: string;
+  emitLifecycleHooks?: boolean;
 }): Promise<
   | { ok: true; key: string; entry: SessionEntry }
   | { ok: false; error: ReturnType<typeof errorShape> }
@@ -392,18 +393,21 @@ export async function performGatewaySessionReset(params: {
   })();
   const { entry, legacyKey, canonicalKey } = loadSessionEntry(params.key);
   const hadExistingEntry = Boolean(entry);
-  const hookEvent = createInternalHookEvent(
-    "command",
-    params.reason,
-    target.canonicalKey ?? params.key,
-    {
-      sessionEntry: entry,
-      previousSessionEntry: entry,
-      commandSource: params.commandSource,
-      cfg,
-    },
-  );
-  await triggerInternalHook(hookEvent);
+  const emitLifecycleHooks = params.emitLifecycleHooks !== false;
+  if (emitLifecycleHooks) {
+    const hookEvent = createInternalHookEvent(
+      "command",
+      params.reason,
+      target.canonicalKey ?? params.key,
+      {
+        sessionEntry: entry,
+        previousSessionEntry: entry,
+        commandSource: params.commandSource,
+        cfg,
+      },
+    );
+    await triggerInternalHook(hookEvent);
+  }
   const mutationCleanupError = await cleanupSessionBeforeMutation({
     cfg,
     key: params.key,
@@ -510,14 +514,16 @@ export async function performGatewaySessionReset(params: {
     store[primaryKey] = nextEntry;
     return nextEntry;
   });
-  emitGatewayBeforeResetPluginHook({
-    cfg,
-    key: params.key,
-    target,
-    storePath,
-    entry: resetSourceEntry,
-    reason: params.reason,
-  });
+  if (emitLifecycleHooks) {
+    emitGatewayBeforeResetPluginHook({
+      cfg,
+      key: params.key,
+      target,
+      storePath,
+      entry: resetSourceEntry,
+      reason: params.reason,
+    });
+  }
 
   const archivedTranscripts = archiveSessionTranscriptsForSessionDetailed({
     sessionId: oldSessionId,
@@ -540,24 +546,26 @@ export async function performGatewaySessionReset(params: {
       mode: 0o600,
     });
   }
-  emitGatewaySessionEndPluginHook({
-    cfg,
-    sessionKey: target.canonicalKey ?? params.key,
-    sessionId: oldSessionId,
-    storePath,
-    sessionFile: oldSessionFile,
-    agentId: target.agentId,
-    reason: params.reason,
-    archivedTranscripts,
-    nextSessionId: next.sessionId,
-  });
-  emitGatewaySessionStartPluginHook({
-    cfg,
-    sessionKey: target.canonicalKey ?? params.key,
-    sessionId: next.sessionId,
-    resumedFrom: oldSessionId,
-  });
-  if (hadExistingEntry) {
+  if (emitLifecycleHooks) {
+    emitGatewaySessionEndPluginHook({
+      cfg,
+      sessionKey: target.canonicalKey ?? params.key,
+      sessionId: oldSessionId,
+      storePath,
+      sessionFile: oldSessionFile,
+      agentId: target.agentId,
+      reason: params.reason,
+      archivedTranscripts,
+      nextSessionId: next.sessionId,
+    });
+    emitGatewaySessionStartPluginHook({
+      cfg,
+      sessionKey: target.canonicalKey ?? params.key,
+      sessionId: next.sessionId,
+      resumedFrom: oldSessionId,
+    });
+  }
+  if (hadExistingEntry && emitLifecycleHooks) {
     await emitSessionUnboundLifecycleEvent({
       targetSessionKey: target.canonicalKey ?? params.key,
       reason: "session-reset",

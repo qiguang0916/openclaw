@@ -77,6 +77,41 @@ describe("extractTextCached", () => {
     expect(extractText(message)).toBeNull();
     expect(extractTextCached(message)).toBeNull();
   });
+
+  it("does not render MiniMax XML tool-call markup as assistant text", () => {
+    const message = {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: [
+            "<minimax:tool_call>",
+            '<invoke name="exec">',
+            '<parameter name="command">find /tmp -name "deep*"</parameter>',
+            "</invoke>",
+            "</minimax:tool_call>",
+          ].join("\n"),
+        },
+      ],
+    };
+    expect(extractText(message)).toBeNull();
+    expect(extractTextCached(message)).toBeNull();
+  });
+
+  it("falls back to assistant errorMessage when no visible text exists", () => {
+    const message = {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: "Your credit balance is too low to access the Anthropic API.",
+    };
+    expect(extractText(message)).toBe(
+      "Error: Your credit balance is too low to access the Anthropic API.",
+    );
+    expect(extractTextCached(message)).toBe(
+      "Error: Your credit balance is too low to access the Anthropic API.",
+    );
+  });
 });
 
 describe("extractThinkingCached", () => {

@@ -566,6 +566,27 @@ describe("gateway session utils", () => {
     const ops = result.agents.find((agent) => agent.id === "ops");
     expect(ops?.model).toEqual({ primary: "anthropic/claude-opus-4-6" });
   });
+
+  test("listAgentsForGateway exposes configured subagent ownership", () => {
+    const cfg = {
+      session: { mainKey: "main" },
+      agents: {
+        list: [
+          {
+            id: "pub-chief",
+            name: "公众号 lead",
+            subagents: { allowAgents: ["pub-write", "pub-style"] },
+          },
+          { id: "pub-write", name: "内容创作" },
+        ],
+      },
+    } as OpenClawConfig;
+
+    const result = listAgentsForGateway(cfg);
+    const pubChief = result.agents.find((agent) => agent.id === "pub-chief");
+    expect(pubChief?.subagentIds).toEqual(["pub-write", "pub-style"]);
+    expect(result.agents.find((agent) => agent.id === "pub-write")?.subagentIds).toBeUndefined();
+  });
 });
 
 describe("resolveSessionModelRef", () => {

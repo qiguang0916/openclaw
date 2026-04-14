@@ -245,4 +245,24 @@ describe("FS tools with workspaceOnly=false", () => {
     });
     await expect(fs.readFile(allowedAbsolutePath, "utf-8")).resolves.toBe("seed\nnew note");
   });
+
+  it("allows tool-only memory flush runs without a write path", () => {
+    const tools = createOpenClawCodingTools({
+      workspaceDir,
+      trigger: "memory",
+      memoryFlushAllowedToolNames: ["read"],
+    });
+
+    expect(tools.map((tool) => tool.name)).toEqual(["read"]);
+  });
+
+  it("still requires a write path when memory flush explicitly allows write", () => {
+    expect(() =>
+      createOpenClawCodingTools({
+        workspaceDir,
+        trigger: "memory",
+        memoryFlushAllowedToolNames: ["read", "write"],
+      }),
+    ).toThrow("memoryFlushWritePath required for memory-triggered tool runs");
+  });
 });

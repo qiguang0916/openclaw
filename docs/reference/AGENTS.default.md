@@ -49,7 +49,7 @@ cp docs/reference/AGENTS.default.md ~/.openclaw/workspace/AGENTS.md
 ## Session start (required)
 
 - Read `SOUL.md`, `USER.md`, and today+yesterday in `memory/`.
-- Read `MEMORY.md` when present; only fall back to lowercase `memory.md` when `MEMORY.md` is absent.
+- If you are using the legacy file-backed lane, read `MEMORY.md` when present; only fall back to lowercase `memory.md` when `MEMORY.md` is absent.
 - Do it before responding.
 
 ## Soul (required)
@@ -65,8 +65,10 @@ cp docs/reference/AGENTS.default.md ~/.openclaw/workspace/AGENTS.md
 
 ## Memory system (recommended)
 
-- Daily log: `memory/YYYY-MM-DD.md` (create `memory/` if needed).
-- Long-term memory: `MEMORY.md` for durable facts, preferences, and decisions.
+- Use the active memory system as your primary durable memory path.
+- In the legacy file-backed lane:
+  - daily log: `memory/YYYY-MM-DD.md` (create `memory/` if needed)
+  - long-term memory: `MEMORY.md` for durable facts, preferences, and decisions
 - Lowercase `memory.md` is legacy fallback only; do not keep both root files on purpose.
 - On session start, read today + yesterday + `MEMORY.md` when present, otherwise `memory.md`.
 - Capture: decisions, preferences, constraints, open loops.

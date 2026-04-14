@@ -70,7 +70,16 @@ export type MemoryFlushPlan = {
   reserveTokensFloor: number;
   prompt: string;
   systemPrompt: string;
-  relativePath: string;
+  /**
+   * Optional append-only workspace file target used by file-backed flush plans.
+   * Tool-driven memory backends may omit this and persist through plugin tools instead.
+   */
+  relativePath?: string;
+  /**
+   * Optional tool allow-list for memory-triggered runs.
+   * When omitted, the runtime falls back to the legacy file-backed ["read", "write"] set.
+   */
+  allowedToolNames?: string[];
 };
 
 export type MemoryFlushPlanResolver = (params: {

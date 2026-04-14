@@ -1,0 +1,144 @@
+{
+  "id": "mempalace-memory",
+  "name": "MemPalace Memory",
+  "description": "MemPalace-backed active memory plugin for OpenClaw (phase 1 skeleton).",
+  "kind": "memory",
+  "uiHints": {
+    "sharedPalacePath": {
+      "label": "Shared Palace Path",
+      "help": "Shared cross-agent MemPalace root for durable user preferences and global facts."
+    },
+    "sharedKnowledgeGraphPath": {
+      "label": "Shared Knowledge Graph Path",
+      "help": "SQLite path for shared durable facts if it differs from the default MemPalace KG path."
+    },
+    "defaultPrivateRoot": {
+      "label": "Private Palace Root",
+      "help": "Base directory used to derive per-agent private MemPalace roots."
+    },
+    "sharedReadAgents": {
+      "label": "Shared Read Agents",
+      "help": "Agent ids allowed to read the shared-user palace."
+    },
+    "sharedWriteAgents": {
+      "label": "Shared Write Agents",
+      "help": "Agent ids allowed to write durable facts into the shared-user palace."
+    },
+    "continuityCueBudget": {
+      "label": "Continuity Cue Budget",
+      "help": "Maximum number of low-cost recall passes before escalation."
+    },
+    "dreaming": {
+      "label": "Dreaming",
+      "help": "MemPalace-native diary/drawer/KG post-processing for recalled memories."
+    }
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean"
+      },
+      "sharedPalacePath": {
+        "type": "string",
+        "minLength": 1
+      },
+      "sharedKnowledgeGraphPath": {
+        "type": "string",
+        "minLength": 1
+      },
+      "defaultPrivateRoot": {
+        "type": "string",
+        "minLength": 1
+      },
+      "sharedReadAgents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "sharedWriteAgents": {
+        "type": "array",
+        "items": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "mcpServerName": {
+        "type": "string",
+        "minLength": 1
+      },
+      "timeoutMs": {
+        "type": "integer",
+        "minimum": 1000
+      },
+      "continuityCueBudget": {
+        "type": "integer",
+        "minimum": 1,
+        "maximum": 3
+      },
+      "dreaming": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "cron": {
+            "type": "string",
+            "minLength": 1
+          },
+          "timezone": {
+            "type": "string",
+            "minLength": 1
+          },
+          "lookbackDays": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "kgThemes": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
+      "perAgent": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "privatePalacePath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "privateKnowledgeGraphPath": {
+              "type": "string",
+              "minLength": 1
+            },
+            "readShared": {
+              "type": "boolean"
+            },
+            "writeShared": {
+              "type": "boolean"
+            },
+            "defaultWing": {
+              "type": "string",
+              "minLength": 1
+            },
+            "defaultRoom": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

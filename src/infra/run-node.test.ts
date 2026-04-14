@@ -3,7 +3,11 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { resolveBuildRequirement, runNodeMain } from "../../scripts/run-node.mjs";
+import {
+  resolveBuildRequirement,
+  runNodeMain,
+  shouldUseSourceReadOnlyFastPath,
+} from "../../scripts/run-node.mjs";
 import {
   bundledDistPluginFile,
   bundledPluginFile,
@@ -12,6 +16,7 @@ import {
 import { withTempDir } from "../test-helpers/temp-dir.js";
 
 const ROOT_SRC = "src/index.ts";
+const ROOT_ENTRY = "src/entry.ts";
 const ROOT_TSCONFIG = "tsconfig.json";
 const ROOT_PACKAGE = "package.json";
 const ROOT_TSDOWN = "tsdown.config.ts";
@@ -31,6 +36,7 @@ const NEW_TIME = new Date("2026-03-13T12:00:01.000Z");
 const BASE_PROJECT_FILES = {
   [ROOT_TSCONFIG]: "{}\n",
   [ROOT_PACKAGE]: '{"name":"openclaw-test"}\n',
+  [ROOT_ENTRY]: "console.log('source entry');\n",
   [DIST_ENTRY]: "console.log('built');\n",
   [BUILD_STAMP]: '{"head":"abc123"}\n',
 } as const;
@@ -69,6 +75,10 @@ function statusCommandSpawn() {
   return [process.execPath, "openclaw.mjs", "status"];
 }
 
+function sourceCommandSpawn(tmp: string, args: string[]) {
+  return [process.execPath, "--import", "tsx", path.join(tmp, ROOT_ENTRY), ...args];
+}
+
 function resolvePath(tmp: string, relativePath: string) {
   return path.join(tmp, relativePath);
 }
@@ -103,7 +113,11 @@ async function setupTrackedProject(
     ...options.files,
   });
   await touchProjectFiles(tmp, options.oldPaths ?? [], OLD_TIME);
-  await touchProjectFiles(tmp, options.buildPaths ?? [], BUILD_TIME);
+  await touchProjectFiles(
+    tmp,
+    [...new Set([ROOT_ENTRY, ...(options.buildPaths ?? [])])],
+    BUILD_TIME,
+  );
   await touchProjectFiles(tmp, options.newPaths ?? [], NEW_TIME);
 }
 
@@ -175,6 +189,30 @@ async function runStatusCommand(params: {
   return await runNodeMain({
     cwd: params.tmp,
     args: ["status"],
+    env: {
+      ...process.env,
+      OPENCLAW_RUNNER_LOG: "0",
+      ...params.env,
+    },
+    spawn: params.spawn,
+    ...(params.spawnSync ? { spawnSync: params.spawnSync } : {}),
+    ...(params.runRuntimePostBuild ? { runRuntimePostBuild: params.runRuntimePostBuild } : {}),
+    execPath: process.execPath,
+    platform: process.platform,
+  });
+}
+
+async function runCommand(params: {
+  tmp: string;
+  args: string[];
+  spawn: (cmd: string, args: string[]) => ReturnType<typeof createExitedProcess>;
+  spawnSync?: (cmd: string, args: string[]) => { status: number; stdout: string };
+  env?: Record<string, string>;
+  runRuntimePostBuild?: (params?: { cwd?: string }) => void;
+}) {
+  return await runNodeMain({
+    cwd: params.tmp,
+    args: params.args,
     env: {
       ...process.env,
       OPENCLAW_RUNNER_LOG: "0",
@@ -606,6 +644,85 @@ describe("run-node script", () => {
         reason: "clean",
       });
     });
+  });
+
+  it("uses the source fast path for read-only memory help when the tree is dirty", async () => {
+    await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
+      await setupTrackedProject(tmp, {
+        files: {
+          [ROOT_SRC]: "export const value = 1;\n",
+        },
+        buildPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE, DIST_ENTRY, BUILD_STAMP],
+      });
+
+      const { spawnCalls, spawn, spawnSync } = createSpawnRecorder({
+        gitHead: "abc123\n",
+        gitStatus: ` M ${ROOT_SRC}\n`,
+      });
+      const exitCode = await runCommand({
+        tmp,
+        args: ["memory", "--help"],
+        spawn,
+        spawnSync,
+      });
+
+      expect(exitCode).toBe(0);
+      expect(spawnCalls).toEqual([sourceCommandSpawn(tmp, ["memory", "--help"])]);
+    });
+  });
+
+  it("uses the source fast path for read-only memory status but still builds for mutating flags", async () => {
+    await withTempDir({ prefix: "openclaw-run-node-" }, async (tmp) => {
+      await setupTrackedProject(tmp, {
+        files: {
+          [ROOT_SRC]: "export const value = 1;\n",
+        },
+        buildPaths: [ROOT_SRC, ROOT_TSCONFIG, ROOT_PACKAGE, DIST_ENTRY, BUILD_STAMP],
+      });
+
+      const readOnlyRecorder = createSpawnRecorder({
+        gitHead: "abc123\n",
+        gitStatus: ` M ${ROOT_SRC}\n`,
+      });
+      const readOnlyExitCode = await runCommand({
+        tmp,
+        args: ["memory", "status", "--json"],
+        spawn: readOnlyRecorder.spawn,
+        spawnSync: readOnlyRecorder.spawnSync,
+      });
+
+      expect(readOnlyExitCode).toBe(0);
+      expect(readOnlyRecorder.spawnCalls).toEqual([
+        sourceCommandSpawn(tmp, ["memory", "status", "--json"]),
+      ]);
+
+      const mutatingRecorder = createSpawnRecorder({
+        gitHead: "abc123\n",
+        gitStatus: ` M ${ROOT_SRC}\n`,
+      });
+      const mutatingExitCode = await runCommand({
+        tmp,
+        args: ["memory", "status", "--fix"],
+        spawn: mutatingRecorder.spawn,
+        spawnSync: mutatingRecorder.spawnSync,
+      });
+
+      expect(mutatingExitCode).toBe(0);
+      expect(mutatingRecorder.spawnCalls).toEqual([
+        expectedBuildSpawn(),
+        [process.execPath, "openclaw.mjs", "memory", "status", "--fix"],
+      ]);
+    });
+  });
+
+  it("classifies read-only CLI fast-path candidates conservatively", () => {
+    expect(shouldUseSourceReadOnlyFastPath(["memory", "--help"])).toBe(true);
+    expect(shouldUseSourceReadOnlyFastPath(["memory", "status"])).toBe(true);
+    expect(shouldUseSourceReadOnlyFastPath(["memory", "status", "--index"])).toBe(false);
+    expect(shouldUseSourceReadOnlyFastPath(["memory", "dream", "status"])).toBe(true);
+    expect(shouldUseSourceReadOnlyFastPath(["wiki", "status", "--json"])).toBe(true);
+    expect(shouldUseSourceReadOnlyFastPath(["wiki", "doctor", "--json"])).toBe(true);
+    expect(shouldUseSourceReadOnlyFastPath(["wiki", "compile"])).toBe(false);
   });
 
   it("repairs missing bundled plugin metadata without rerunning tsdown", async () => {

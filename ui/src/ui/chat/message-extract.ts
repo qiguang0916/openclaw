@@ -9,11 +9,18 @@ const thinkingCache = new WeakMap<object, string | null>();
 function processMessageText(text: string, role: string): string {
   const shouldStripInboundMetadata = role.toLowerCase() === "user";
   if (role === "assistant") {
-    return stripThinkingTags(text);
+    return stripMinimaxToolCallMarkup(stripThinkingTags(text));
   }
   return shouldStripInboundMetadata
     ? stripInboundMetadata(stripEnvelope(text))
     : stripEnvelope(text);
+}
+
+function stripMinimaxToolCallMarkup(text: string): string {
+  return text
+    .replace(/<minimax:tool_call>[\s\S]*?<\/minimax:tool_call>/gi, "")
+    .replace(/<invoke\s+name="[^"]+">[\s\S]*?<\/invoke>/gi, "")
+    .trim();
 }
 
 export function extractText(message: unknown): string | null {
@@ -21,10 +28,15 @@ export function extractText(message: unknown): string | null {
   const role = typeof m.role === "string" ? m.role : "";
   const raw =
     role === "assistant" ? extractSharedAssistantVisibleText(message) : extractRawText(message);
+  if (!raw && role === "assistant" && typeof m.errorMessage === "string") {
+    const normalizedError = m.errorMessage.trim();
+    return normalizedError ? `Error: ${normalizedError}` : null;
+  }
   if (!raw) {
     return null;
   }
-  return processMessageText(raw, role);
+  const processed = processMessageText(raw, role);
+  return processed ? processed : null;
 }
 
 export function extractTextCached(message: unknown): string | null {

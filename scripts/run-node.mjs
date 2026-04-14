@@ -13,6 +13,12 @@ import { runRuntimePostBuild } from "./runtime-postbuild.mjs";
 
 const buildScript = "scripts/tsdown-build.mjs";
 const compilerArgs = [buildScript, "--no-clean"];
+const SOURCE_ENTRY = path.join("src", "entry.ts");
+const FLAG_TERMINATOR = "--";
+const ROOT_BOOLEAN_FLAGS = new Set(["--dev", "--no-color"]);
+const ROOT_VALUE_FLAGS = new Set(["--profile", "--log-level", "--container"]);
+const HELP_FLAGS = new Set(["-h", "--help"]);
+const VERSION_FLAGS = new Set(["-V", "--version"]);
 
 const runNodeSourceRoots = ["src", BUNDLED_PLUGIN_ROOT_DIR];
 const runNodeConfigFiles = ["tsconfig.json", "package.json", "tsdown.config.ts"];
@@ -250,6 +256,100 @@ const BUILD_REASON_LABELS = {
 
 const formatBuildReason = (reason) => BUILD_REASON_LABELS[reason] ?? reason;
 
+const isValueToken = (arg) => {
+  if (!arg || arg === FLAG_TERMINATOR) {
+    return false;
+  }
+  if (!arg.startsWith("-")) {
+    return true;
+  }
+  return /^-\d+(?:\.\d+)?$/.test(arg);
+};
+
+const consumeRootOptionToken = (args, index) => {
+  const arg = args[index];
+  if (!arg) {
+    return 0;
+  }
+  if (ROOT_BOOLEAN_FLAGS.has(arg)) {
+    return 1;
+  }
+  if (
+    arg.startsWith("--profile=") ||
+    arg.startsWith("--log-level=") ||
+    arg.startsWith("--container=")
+  ) {
+    return 1;
+  }
+  if (ROOT_VALUE_FLAGS.has(arg)) {
+    return isValueToken(args[index + 1]) ? 2 : 1;
+  }
+  return 0;
+};
+
+const hasInfoOnlyFlag = (args) => args.some((arg) => HELP_FLAGS.has(arg) || VERSION_FLAGS.has(arg));
+
+const hasFlag = (args, name) => {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg || arg === FLAG_TERMINATOR) {
+      break;
+    }
+    const consumed = consumeRootOptionToken(args, index);
+    if (consumed > 0) {
+      index += consumed - 1;
+      continue;
+    }
+    if (arg === name) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const getCommandPathWithRootOptions = (args, depth = 3) => {
+  const commandPath = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg || arg === FLAG_TERMINATOR) {
+      break;
+    }
+    const consumed = consumeRootOptionToken(args, index);
+    if (consumed > 0) {
+      index += consumed - 1;
+      continue;
+    }
+    if (arg.startsWith("-")) {
+      continue;
+    }
+    commandPath.push(arg);
+    if (commandPath.length >= depth) {
+      break;
+    }
+  }
+  return commandPath;
+};
+
+export const shouldUseSourceReadOnlyFastPath = (args) => {
+  if (hasInfoOnlyFlag(args)) {
+    return true;
+  }
+  const commandPath = getCommandPathWithRootOptions(args, 3);
+  if (commandPath.length === 0) {
+    return false;
+  }
+  if (commandPath[0] === "memory") {
+    if (commandPath[1] === "status") {
+      return !hasFlag(args, "--fix") && !hasFlag(args, "--index");
+    }
+    return commandPath[1] === "dream" && commandPath[2] === "status";
+  }
+  if (commandPath[0] === "wiki") {
+    return commandPath[1] === "status" || commandPath[1] === "doctor";
+  }
+  return false;
+};
+
 const SIGNAL_EXIT_CODES = {
   SIGINT: 130,
   SIGTERM: 143,
@@ -329,6 +429,26 @@ const runOpenClaw = async (deps) => {
   return res.exitCode ?? 1;
 };
 
+const runOpenClawSource = async (deps) => {
+  const nodeProcess = deps.spawn(
+    deps.execPath,
+    ["--import", "tsx", path.join(deps.cwd, SOURCE_ENTRY), ...deps.args],
+    {
+      cwd: deps.cwd,
+      env: deps.env,
+      stdio: "inherit",
+    },
+  );
+  const res = await waitForSpawnedProcess(nodeProcess, deps);
+  if (res.exitSignal) {
+    return getSignalExitCode(res.exitSignal);
+  }
+  if (res.forwardedSignal) {
+    return getSignalExitCode(res.forwardedSignal);
+  }
+  return res.exitCode ?? 1;
+};
+
 const syncRuntimeArtifacts = (deps) => {
   try {
     deps.runRuntimePostBuild({ cwd: deps.cwd });
@@ -386,6 +506,19 @@ export async function runNodeMain(params = {}) {
       return 1;
     }
     return await runOpenClaw(deps);
+  }
+
+  const sourceEntryPath = path.join(deps.cwd, SOURCE_ENTRY);
+  if (
+    buildRequirement.reason !== "force_build" &&
+    deps.fs.existsSync(sourceEntryPath) &&
+    shouldUseSourceReadOnlyFastPath(deps.args)
+  ) {
+    logRunner(
+      `Skipping TypeScript build for read-only CLI fast path (reason: ${buildRequirement.reason}).`,
+      deps,
+    );
+    return await runOpenClawSource(deps);
   }
 
   logRunner(

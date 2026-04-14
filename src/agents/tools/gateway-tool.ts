@@ -19,6 +19,7 @@ const log = createSubsystemLogger("gateway-tool");
 
 const DEFAULT_UPDATE_TIMEOUT_MS = 20 * 60_000;
 const PROTECTED_GATEWAY_CONFIG_PATHS = ["tools.exec.ask", "tools.exec.security"] as const;
+const CONFIG_GET_ALLOWLIST_HINT = 'plugins.allow may exclude "config.get"';
 
 function resolveBaseHashFromSnapshot(snapshot: unknown): string | undefined {
   if (!snapshot || typeof snapshot !== "object") {
@@ -42,6 +43,16 @@ function getSnapshotConfig(snapshot: unknown): Record<string, unknown> {
     throw new Error("config.get response is missing a config object.");
   }
   return config as Record<string, unknown>;
+}
+
+function describeConfigGetFailure(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('excludes "config.get"')) {
+    return new Error(
+      `Gateway config writes require config.get access before apply/patch; ${CONFIG_GET_ALLOWLIST_HINT}.`,
+    );
+  }
+  return error instanceof Error ? error : new Error(message);
 }
 
 function parseGatewayConfigMutationRaw(
@@ -236,7 +247,12 @@ export function createGatewayTool(opts?: {
         restartDelayMs: number | undefined;
       }> => {
         const raw = readStringParam(params, "raw", { required: true });
-        const snapshot = await callGatewayTool("config.get", gatewayOpts, {});
+        let snapshot: unknown;
+        try {
+          snapshot = await callGatewayTool("config.get", gatewayOpts, {});
+        } catch (error) {
+          throw describeConfigGetFailure(error);
+        }
         // Always fetch config.get so we can compare protected exec settings
         // against the current snapshot before forwarding any write RPC.
         const snapshotConfig = getSnapshotConfig(snapshot);

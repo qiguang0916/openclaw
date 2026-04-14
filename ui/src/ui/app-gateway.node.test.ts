@@ -234,6 +234,10 @@ describe("connectGateway", () => {
         createdAt: 2,
       },
     ];
+    connectGateway(host);
+    const client = gatewayClientInstances[0];
+    expect(client).toBeDefined();
+
     host.execApprovalQueue = [
       {
         id: "approval-1",
@@ -243,10 +247,6 @@ describe("connectGateway", () => {
         expiresAtMs: Date.now() + 60_000,
       },
     ];
-
-    connectGateway(host);
-    const client = gatewayClientInstances[0];
-    expect(client).toBeDefined();
 
     client.emitGap(20, 24);
 
@@ -561,6 +561,169 @@ describe("connectGateway", () => {
     emitToolResultEvent(client);
 
     expect(loadChatHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it("does not reload chat history after a final chat event that includes a message", () => {
+    const { client } = connectHostGateway();
+
+    client.emitEvent({
+      event: "chat",
+      payload: {
+        runId: "engine-run-plain",
+        sessionKey: "main",
+        state: "final",
+        message: {
+          role: "assistant",
+          content: [{ type: "text", text: "Done" }],
+        },
+      },
+    });
+
+    expect(loadChatHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active waiting indicator when sessions.changed arrives mid-run", () => {
+    const { host, client } = connectHostGateway();
+    const chatHost = host as typeof host & {
+      chatStream: string | null;
+      chatStreamStartedAt: number | null;
+    };
+    chatHost.chatRunId = "run-waiting";
+    chatHost.chatStream = "";
+    chatHost.chatStreamStartedAt = 123;
+
+    client.emitEvent({
+      event: "sessions.changed",
+      payload: { sessionKey: "main", reason: "usage" },
+    });
+
+    expect(chatHost.chatRunId).toBe("run-waiting");
+    expect(chatHost.chatStream).toBe("");
+    expect(chatHost.chatStreamStartedAt).toBe(123);
+    expect(loadChatHistoryMock).not.toHaveBeenCalled();
+  });
+
+  it("routes session.tool into the chat tool stream", () => {
+    const { host, client } = connectHostGateway();
+    const toolHost = host as typeof host & {
+      toolStreamOrder: string[];
+      chatToolMessages: unknown[];
+    };
+
+    client.emitEvent({
+      event: "session.tool",
+      payload: {
+        runId: "engine-run-1",
+        seq: 1,
+        stream: "tool",
+        ts: 1,
+        sessionKey: "main",
+        data: {
+          toolCallId: "tool-1",
+          name: "write_file",
+          phase: "result",
+          result: { text: "saved report" },
+        },
+      },
+    });
+
+    expect(toolHost.toolStreamOrder).toEqual(["tool-1"]);
+    expect(toolHost.chatToolMessages).toHaveLength(1);
+  });
+
+  it("applies chat.progress summaries to the active chat session", () => {
+    const { host, client } = connectHostGateway();
+    const chatHost = host as typeof host & {
+      chatLastActivityAt?: number;
+      chatLastActivityKind?: string | null;
+      chatProgressTick?: number;
+      chatRunId: string | null;
+    };
+    chatHost.chatRunId = "run-progress";
+
+    client.emitEvent({
+      event: "chat.progress",
+      payload: {
+        runId: "run-progress",
+        sessionKey: "main",
+        phase: "tool",
+        summary: "工具执行中：write_file",
+        ts: 1234,
+      },
+    });
+
+    expect(chatHost.chatLastActivityKind).toBe("工具执行中：write_file");
+    expect(chatHost.chatLastActivityAt).toBe(1234);
+    expect(chatHost.chatProgressTick).toBe(1234);
+  });
+
+  it("recovers an active waiting indicator when terminal sessions.changed follows tool activity", () => {
+    const { host, client } = connectHostGateway();
+    const chatHost = host as typeof host & {
+      chatStream: string | null;
+      chatStreamStartedAt: number | null;
+      toolStreamOrder: string[];
+    };
+    chatHost.chatRunId = "run-waiting";
+    chatHost.chatStream = "";
+    chatHost.chatStreamStartedAt = 123;
+
+    client.emitEvent({
+      event: "session.tool",
+      payload: {
+        runId: "engine-run-1",
+        seq: 1,
+        stream: "tool",
+        ts: 1,
+        sessionKey: "main",
+        data: {
+          toolCallId: "tool-1",
+          name: "write_file",
+          phase: "result",
+          result: { text: "saved report" },
+        },
+      },
+    });
+
+    expect(chatHost.toolStreamOrder).toEqual(["tool-1"]);
+
+    client.emitEvent({
+      event: "sessions.changed",
+      payload: { sessionKey: "main", phase: "end" },
+    });
+
+    expect(chatHost.chatRunId).toBeNull();
+    expect(chatHost.chatStream).toBeNull();
+    expect(chatHost.chatStreamStartedAt).toBeNull();
+    expect(chatHost.toolStreamOrder).toEqual([]);
+    expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("recovers an active waiting indicator when terminal sessions.changed matches clientRunId", () => {
+    const { host, client } = connectHostGateway();
+    const chatHost = host as typeof host & {
+      chatStream: string | null;
+      chatStreamStartedAt: number | null;
+      toolStreamOrder: string[];
+    };
+    chatHost.chatRunId = "run-waiting";
+    chatHost.chatStream = "";
+    chatHost.chatStreamStartedAt = 123;
+
+    client.emitEvent({
+      event: "sessions.changed",
+      payload: {
+        sessionKey: "main",
+        phase: "end",
+        clientRunId: "run-waiting",
+      },
+    });
+
+    expect(chatHost.chatRunId).toBeNull();
+    expect(chatHost.chatStream).toBeNull();
+    expect(chatHost.chatStreamStartedAt).toBeNull();
+    expect(chatHost.toolStreamOrder).toEqual([]);
+    expect(loadChatHistoryMock).toHaveBeenCalledTimes(1);
   });
 
   it("routes plugin.approval.requested into execApprovalQueue with kind plugin", () => {

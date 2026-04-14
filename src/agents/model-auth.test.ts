@@ -22,6 +22,7 @@ import {
 
 vi.mock("../plugins/provider-runtime.js", () => ({
   buildProviderMissingAuthMessageWithPlugin: () => undefined,
+  resolveExternalAuthProfilesWithPlugins: () => [],
   shouldDeferProviderSyntheticProfileAuthWithPlugin: (params: {
     provider: string;
     context: { resolvedApiKey?: string };
@@ -812,6 +813,30 @@ describe("applyAuthHeaderOverride", () => {
     );
 
     expect(result.headers).toEqual({ Authorization: "Bearer test-api-key" });
+  });
+
+  it("injects Authorization when implicit plugin model carries authHeader", () => {
+    const result = applyAuthHeaderOverride(
+      {
+        ...baseModel,
+        provider: "minimax",
+        id: "MiniMax-M2.7",
+        name: "MiniMax M2.7",
+        api: "anthropic-messages",
+        baseUrl: "https://api.minimax.io/anthropic",
+        authHeader: true,
+      } as Model<"anthropic-messages"> & { authHeader: true },
+      { apiKey: "minimax-api-key", source: "env: MINIMAX_API_KEY", mode: "api-key" },
+      {
+        plugins: {
+          entries: {
+            minimax: { enabled: true },
+          },
+        },
+      },
+    );
+
+    expect(result.headers).toEqual({ Authorization: "Bearer minimax-api-key" });
   });
 
   it("preserves existing model headers when injecting Authorization", () => {

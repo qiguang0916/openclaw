@@ -187,6 +187,34 @@ function shouldKeepBroadChangedRun(changedPaths) {
   );
 }
 
+export function registerProcessCleanupHandlers(params) {
+  const proc = params.process ?? process;
+  const release = params.release ?? (() => {});
+  const exit = params.exit ?? ((code) => proc.exit(code));
+
+  const onExit = () => {
+    release();
+  };
+  const onSigInt = () => {
+    release();
+    exit(130);
+  };
+  const onSigTerm = () => {
+    release();
+    exit(143);
+  };
+
+  proc.once("exit", onExit);
+  proc.once("SIGINT", onSigInt);
+  proc.once("SIGTERM", onSigTerm);
+
+  return () => {
+    proc.off("exit", onExit);
+    proc.off("SIGINT", onSigInt);
+    proc.off("SIGTERM", onSigTerm);
+  };
+}
+
 function isRoutableChangedTarget(changedPath) {
   return /^(?:src|test|extensions|ui|packages|apps)(?:\/|$)/u.test(changedPath);
 }

@@ -251,6 +251,31 @@ describe("chat run registry", () => {
   });
 });
 
+describe("gateway broadcaster", () => {
+  test("does not assign global seq numbers to dropIfSlow events", () => {
+    const send = vi.fn();
+    const clients = new Set<GatewayWsClient>([
+      {
+        socket: { send, bufferedAmount: 0 } as unknown as GatewayWsClient["socket"],
+        connect: { role: "operator", scopes: ["operator.read"] } as GatewayWsClient["connect"],
+        connId: "c-read",
+        usesSharedGatewayAuth: false,
+      },
+    ]);
+
+    const { broadcast } = createGatewayBroadcaster({ clients });
+
+    broadcast("chat.progress", { runId: "run-1" }, { dropIfSlow: true });
+    broadcast("chat", { runId: "run-1", state: "final" });
+
+    expect(send).toHaveBeenCalledTimes(2);
+    const firstFrame = JSON.parse(send.mock.calls[0]?.[0] as string) as { seq?: number };
+    const secondFrame = JSON.parse(send.mock.calls[1]?.[0] as string) as { seq?: number };
+    expect(firstFrame.seq).toBeUndefined();
+    expect(secondFrame.seq).toBe(1);
+  });
+});
+
 describe("late-arriving invoke results", () => {
   test("returns success for unknown invoke ids for both success and error payloads", async () => {
     const nodeId = "node-123";

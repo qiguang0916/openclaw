@@ -12,6 +12,8 @@ vi.mock("./app-settings.ts", () => ({
 }));
 
 let handleSendChat: typeof import("./app-chat.ts").handleSendChat;
+let handleAbortChat: typeof import("./app-chat.ts").handleAbortChat;
+let resetChatSession: typeof import("./app-chat.ts").resetChatSession;
 let refreshChatAvatar: typeof import("./app-chat.ts").refreshChatAvatar;
 let clearPendingQueueItemsForRun: typeof import("./app-chat.ts").clearPendingQueueItemsForRun;
 
@@ -19,14 +21,23 @@ async function loadChatHelpers(params?: { reload?: boolean }): Promise<void> {
   if (params?.reload) {
     vi.resetModules();
   }
-  ({ handleSendChat, refreshChatAvatar, clearPendingQueueItemsForRun } =
-    await import("./app-chat.ts"));
+  ({
+    handleSendChat,
+    handleAbortChat,
+    resetChatSession,
+    refreshChatAvatar,
+    clearPendingQueueItemsForRun,
+  } = await import("./app-chat.ts"));
 }
 
 function makeHost(overrides?: Partial<ChatHost>): ChatHost {
   return {
     client: null,
+    chatLastActivityAt: 2_000,
+    chatLastActivityKind: null,
     chatMessages: [],
+    chatProgressTick: 2_000,
+    chatRunStartedAt: 1_000,
     chatStream: null,
     connected: true,
     chatMessage: "",
@@ -221,6 +232,74 @@ describe("handleSendChat", () => {
         text: "follow up",
       }),
     ]);
+  });
+
+  it("removes pending queue indicators when abort recovers a stale run", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true, aborted: false, runIds: [] });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      chatRunId: "run-1",
+      chatQueue: [
+        {
+          id: "pending",
+          text: "/steer tighten the plan",
+          createdAt: 1,
+          pendingRunId: "run-1",
+        },
+        {
+          id: "queued",
+          text: "follow up",
+          createdAt: 2,
+        },
+      ],
+    });
+
+    await handleAbortChat(host);
+
+    expect(request).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "agent:main",
+      runId: "run-1",
+    });
+    expect(host.chatRunId).toBeNull();
+    expect(host.chatQueue).toEqual([
+      expect.objectContaining({
+        id: "queued",
+        text: "follow up",
+      }),
+    ]);
+  });
+
+  it("resets the current chat without starting a model turn", async () => {
+    const request = vi.fn().mockResolvedValueOnce({ ok: true }).mockResolvedValueOnce({
+      messages: [],
+      thinkingLevel: null,
+    });
+    const host = makeHost({
+      client: { request } as unknown as ChatHost["client"],
+      chatRunId: "run-1",
+      chatSending: true,
+      chatStream: "thinking",
+      chatMessages: [{ role: "user", content: "old" }],
+      chatQueue: [{ id: "queued", text: "later", createdAt: 1 }],
+    });
+
+    const ok = await resetChatSession(host);
+
+    expect(ok).toBe(true);
+    expect(request).toHaveBeenCalledWith("sessions.reset", {
+      key: "agent:main",
+      emitLifecycleHooks: false,
+    });
+    expect(request).toHaveBeenCalledWith("chat.history", {
+      sessionKey: "agent:main",
+      limit: 200,
+    });
+    expect(request).not.toHaveBeenCalledWith("chat.send", expect.anything());
+    expect(host.chatRunId).toBeNull();
+    expect(host.chatSending).toBe(false);
+    expect(host.chatStream).toBeNull();
+    expect(host.chatMessages).toEqual([]);
+    expect(host.chatQueue).toEqual([]);
   });
 });
 

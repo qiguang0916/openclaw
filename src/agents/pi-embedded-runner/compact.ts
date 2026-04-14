@@ -67,6 +67,11 @@ import {
 } from "../pi-hooks/compaction-safeguard-runtime.js";
 import { createPreparedEmbeddedPiSettingsManager } from "../pi-project-settings.js";
 import { createOpenClawCodingTools } from "../pi-tools.js";
+import {
+  isToolAllowedByPolicies,
+  resolveEffectiveToolPolicy,
+  resolveGroupToolPolicy,
+} from "../pi-tools.policy.js";
 import { registerProviderStreamForModel } from "../provider-stream.js";
 import { ensureRuntimePluginsLoaded } from "../runtime-plugins.js";
 import { resolveSandboxContext } from "../sandbox.js";
@@ -84,6 +89,7 @@ import {
   resolveSkillsPromptForRun,
   type SkillSnapshot,
 } from "../skills.js";
+import { mergeAlsoAllowPolicy, resolveToolProfilePolicy } from "../tool-policy.js";
 import { resolveTranscriptPolicy } from "../transcript-policy.js";
 import { classifyCompactionReason, resolveCompactionFailureReason } from "./compact-reasons.js";
 import {
@@ -515,6 +521,38 @@ export async function compactEmbeddedPiSessionDirect(
       modelApi: model.api,
       model,
     });
+    const effectiveToolPolicy = resolveEffectiveToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      agentId: effectiveSkillAgentId,
+      modelProvider: model.provider,
+      modelId,
+    });
+    const groupToolPolicy = resolveGroupToolPolicy({
+      config: params.config,
+      sessionKey: params.sessionKey,
+      messageProvider: params.messageProvider,
+    });
+    const profilePolicy = mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(effectiveToolPolicy.profile),
+      effectiveToolPolicy.profileAlsoAllow,
+    );
+    const providerProfilePolicy = mergeAlsoAllowPolicy(
+      resolveToolProfilePolicy(effectiveToolPolicy.providerProfile),
+      effectiveToolPolicy.providerProfileAlsoAllow,
+    );
+    const policyFilters = [
+      profilePolicy,
+      providerProfilePolicy,
+      effectiveToolPolicy.globalPolicy,
+      effectiveToolPolicy.globalProviderPolicy,
+      effectiveToolPolicy.agentPolicy,
+      effectiveToolPolicy.agentProviderPolicy,
+      groupToolPolicy,
+      sandbox?.tools,
+    ];
+    const filterConfiguredTools = <TTool extends { name: string }>(toolsToFilter: TTool[]) =>
+      toolsToFilter.filter((tool) => isToolAllowedByPolicies(tool.name, policyFilters));
     const bundleMcpRuntime = toolsEnabled
       ? await createBundleMcpToolRuntime({
           workspaceDir: effectiveWorkspace,
@@ -534,8 +572,8 @@ export async function compactEmbeddedPiSessionDirect(
       : undefined;
     const effectiveTools = [
       ...tools,
-      ...(bundleMcpRuntime?.tools ?? []),
-      ...(bundleLspRuntime?.tools ?? []),
+      ...filterConfiguredTools(bundleMcpRuntime?.tools ?? []),
+      ...filterConfiguredTools(bundleLspRuntime?.tools ?? []),
     ];
     const allowedToolNames = collectAllowedToolNames({ tools: effectiveTools });
     logProviderToolSchemaDiagnostics({

@@ -127,6 +127,21 @@ vi.mock("../agents/openclaw-tools.js", () => {
       execute: async () => ({ ok: true, result: "apply_patch" }),
     },
     {
+      name: "memory_write",
+      parameters: { type: "object", properties: { content: { type: "string" } } },
+      execute: async () => ({ ok: true, result: "memory_write" }),
+    },
+    {
+      name: "memory_kg_query",
+      parameters: { type: "object", properties: { query: { type: "string" } } },
+      execute: async () => ({ ok: true, result: "memory_kg_query" }),
+    },
+    {
+      name: "memory_stats",
+      parameters: { type: "object", properties: {} },
+      execute: async () => ({ ok: true, result: "memory_stats" }),
+    },
+    {
       name: "nodes",
       ownerOnly: true,
       parameters: { type: "object", properties: {} },
@@ -558,6 +573,33 @@ describe("POST /tools/invoke", () => {
 
     const profileRes = await invokeAgentsListAuthed({ sessionKey: "main" });
     expect(profileRes.status).toBe(404);
+  });
+
+  it("treats shared memory compatibility aliases as memory tools in VITEST gating", async () => {
+    cfg = {
+      ...cfg,
+      plugins: {
+        enabled: false,
+      },
+      agents: {
+        list: [{ id: "main", default: true, tools: { allow: ["memory_write"] } }],
+      },
+    };
+
+    const res = await invokeToolAuthed({
+      tool: "memory_write",
+      args: { content: "remember this" },
+      sessionKey: "main",
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: false,
+      error: {
+        type: "invalid_request",
+        message: expect.stringContaining("memory tools are disabled in tests"),
+      },
+    });
   });
 
   it("denies sessions_spawn via HTTP even when agent policy allows", async () => {

@@ -184,11 +184,11 @@ export async function runWikiDoctor(params: {
   json?: boolean;
   stdout?: Pick<NodeJS.WriteStream, "write">;
 }) {
-  await syncMemoryWikiImportedSources({ config: params.config, appConfig: params.appConfig });
   const report = buildMemoryWikiDoctorReport(await resolveMemoryWikiStatus(params.config));
   if (!report.healthy) {
     process.exitCode = 1;
   }
+  await syncMemoryWikiImportedSources({ config: params.config, appConfig: params.appConfig });
   writeOutput(
     params.json ? JSON.stringify(report, null, 2) : renderMemoryWikiDoctor(report),
     params.stdout,

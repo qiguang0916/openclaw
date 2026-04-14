@@ -102,7 +102,8 @@ and the [Plugin SDK Overview](/plugins/sdk-overview).
   </Accordion>
 
   <Accordion title="Memory plugins">
-    - `memory-core` — bundled memory search (default via `plugins.slots.memory`)
+    - `memory-core` — bundled legacy file-backed memory compatibility plugin
+    - `mempalace-memory` — bundled MemPalace-backed active memory plugin (primary path when `plugins.slots.memory = "mempalace-memory"`)
     - `memory-lancedb` — install-on-demand long-term memory with auto-recall/capture (set `plugins.slots.memory = "memory-lancedb"`)
   </Accordion>
 
@@ -193,17 +194,17 @@ Some categories are exclusive (only one active at a time):
 {
   plugins: {
     slots: {
-      memory: "memory-core", // or "none" to disable
+      memory: "mempalace-memory", // or "memory-core" for the legacy file-backed lane, or "none" to disable
       contextEngine: "legacy", // or a plugin id
     },
   },
 }
 ```
 
-| Slot            | What it controls      | Default             |
-| --------------- | --------------------- | ------------------- |
-| `memory`        | Active memory plugin  | `memory-core`       |
-| `contextEngine` | Active context engine | `legacy` (built-in) |
+| Slot            | What it controls      | Default                                                                                                                  |
+| --------------- | --------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `memory`        | Active memory plugin  | deployment-specific (`mempalace-memory` is the active primary path here; `memory-core` is the legacy compatibility lane) |
+| `contextEngine` | Active context engine | `legacy` (built-in)                                                                                                      |
 
 ## CLI reference
 

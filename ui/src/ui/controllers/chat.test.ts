@@ -120,7 +120,11 @@ describe("handleChatEvent", () => {
     expect(state.chatStream).toBe("Working...");
     expect(state.chatStreamStartedAt).toBe(123);
     expect(state.chatMessages).toHaveLength(1);
-    expect(state.chatMessages[0]).toEqual(payload.message);
+    expect(state.chatMessages[0]).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "Sub-agent findings" }],
+      __openclaw: { clientRunId: "run-announce" },
+    });
   });
 
   it("drops NO_REPLY final payload from another run without clearing active stream", () => {
@@ -248,7 +252,14 @@ describe("handleChatEvent", () => {
       message: finalMsg,
     };
     expect(handleChatEvent(state, payload)).toBe("final");
-    expect(state.chatMessages).toEqual([finalMsg]);
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "Complete reply" }],
+        timestamp: 101,
+        __openclaw: { clientRunId: "run-1" },
+      }),
+    ]);
     expect(state.chatStream).toBe(null);
   });
 
@@ -270,10 +281,165 @@ describe("handleChatEvent", () => {
       },
     };
     expect(handleChatEvent(state, payload)).toBe("final");
-    expect(state.chatMessages).toEqual([payload.message]);
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "Reply" }],
+        timestamp: 101,
+        __openclaw: { clientRunId: "run-1" },
+      }),
+    ]);
     expect(state.chatRunId).toBe(null);
     expect(state.chatStream).toBe(null);
     expect(state.chatStreamStartedAt).toBe(null);
+  });
+
+  it("does not duplicate repeated final payload messages for the same run", () => {
+    const state = createState({
+      sessionKey: "main",
+      chatRunId: "run-1",
+      chatStream: "Reply",
+      chatStreamStartedAt: 100,
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-1",
+      sessionKey: "main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "Reply" }],
+        timestamp: 101,
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    state.chatRunId = "run-1";
+    state.chatStream = "Reply";
+    state.chatStreamStartedAt = 102;
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "Reply" }],
+        timestamp: 101,
+        __openclaw: { clientRunId: "run-1" },
+      }),
+    ]);
+  });
+
+  it("replaces a recent assistant progress message when the next one extends it", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-12T09:53:05Z"));
+
+    const firstMessage = {
+      role: "assistant",
+      content: [
+        {
+          type: "text",
+          text: "我正在收集测试数据，还需要运行几组关键测试用例。让我继续完成测试。",
+        },
+      ],
+      timestamp: Date.now() - 2000,
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatMessages: [firstMessage],
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-progress-2",
+      sessionKey: "main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "我正在收集测试数据，还需要运行几组关键测试用例。让我继续完成测试。数据收集完成。现在整理报告：",
+          },
+        ],
+        timestamp: Date.now(),
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [
+          {
+            type: "text",
+            text: "我正在收集测试数据，还需要运行几组关键测试用例。让我继续完成测试。数据收集完成。现在整理报告：",
+          },
+        ],
+        __openclaw: { clientRunId: "run-progress-2" },
+      }),
+    ]);
+
+    vi.useRealTimers();
+  });
+
+  it("replaces an adjacent assistant duplicate even when the update arrives under a different run", () => {
+    const previousMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "第一步：确认控制UI的显示问题" }],
+      timestamp: 1,
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatMessages: [previousMessage],
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-announce-2",
+      sessionKey: "main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "第一步：确认控制UI的显示问题\n\n现在开始检查网关状态。" }],
+        timestamp: 2,
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "第一步：确认控制UI的显示问题\n\n现在开始检查网关状态。" }],
+        __openclaw: { clientRunId: "run-announce-2" },
+      }),
+    ]);
+  });
+
+  it("replaces repeated final payloads that share the same __openclaw id", () => {
+    const firstMessage = {
+      role: "assistant",
+      content: [{ type: "text", text: "短回复" }],
+      timestamp: 1,
+      __openclaw: { id: "msg-1" },
+    };
+    const state = createState({
+      sessionKey: "main",
+      chatMessages: [firstMessage],
+    });
+    const payload: ChatEventPayload = {
+      runId: "run-announce-2",
+      sessionKey: "main",
+      state: "final",
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "短回复，带更多细节" }],
+        timestamp: 2,
+        __openclaw: { id: "msg-1" },
+      },
+    };
+
+    expect(handleChatEvent(state, payload)).toBe("final");
+    expect(state.chatMessages).toEqual([
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "短回复，带更多细节" }],
+        __openclaw: { id: "msg-1", clientRunId: "run-announce-2" },
+      }),
+    ]);
   });
 
   it("processes aborted from own run and keeps partial assistant message", () => {
@@ -305,7 +471,15 @@ describe("handleChatEvent", () => {
     expect(state.chatRunId).toBe(null);
     expect(state.chatStream).toBe(null);
     expect(state.chatStreamStartedAt).toBe(null);
-    expect(state.chatMessages).toEqual([existingMessage, partialMessage]);
+    expect(state.chatMessages).toEqual([
+      existingMessage,
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "Partial reply" }],
+        timestamp: 2,
+        __openclaw: { clientRunId: "run-1" },
+      }),
+    ]);
   });
 
   it("falls back to streamed partial when aborted payload message is invalid", () => {
@@ -536,6 +710,65 @@ describe("loadChatHistory", () => {
     expect(state.chatLoading).toBe(false);
   });
 
+  it("preserves the optimistic user message while an active run is waiting for history", async () => {
+    const request = vi.fn().mockResolvedValue({
+      messages: [{ role: "assistant", content: [{ type: "text", text: "old answer" }] }],
+      thinkingLevel: "off",
+    });
+    const optimistic = {
+      role: "user",
+      optimisticRunId: "run-1",
+      content: [{ type: "text", text: "你是哪个模型" }],
+      timestamp: 123,
+    };
+    const state = createState({
+      connected: true,
+      client: { request } as unknown as ChatState["client"],
+      chatRunId: "run-1",
+      chatMessages: [optimistic],
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([
+      { role: "assistant", content: [{ type: "text", text: "old answer" }] },
+      optimistic,
+    ]);
+  });
+
+  it("does not duplicate the optimistic user message after history already contains it", async () => {
+    const request = vi.fn().mockResolvedValue({
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "metadata\n\n你是哪个模型" }],
+        },
+      ],
+      thinkingLevel: "off",
+    });
+    const optimistic = {
+      role: "user",
+      optimisticRunId: "run-1",
+      content: [{ type: "text", text: "你是哪个模型" }],
+      timestamp: 123,
+    };
+    const state = createState({
+      connected: true,
+      client: { request } as unknown as ChatState["client"],
+      chatRunId: "run-1",
+      chatMessages: [optimistic],
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "metadata\n\n你是哪个模型" }],
+      },
+    ]);
+  });
+
   it("keeps assistant message when text field has real content but content is NO_REPLY", async () => {
     const messages = [{ role: "assistant", text: "real reply", content: "NO_REPLY" }];
     const mockClient = {
@@ -550,6 +783,84 @@ describe("loadChatHistory", () => {
 
     // text takes precedence — "real reply" is NOT silent, so message is kept.
     expect(state.chatMessages).toHaveLength(1);
+  });
+
+  it("dedupes consecutive assistant duplicates when loading history", async () => {
+    const messages = [
+      { role: "assistant", content: [{ type: "text", text: "same answer" }], timestamp: 1 },
+      { role: "assistant", content: [{ type: "text", text: "same answer" }], timestamp: 2 },
+      { role: "assistant", content: [{ type: "text", text: "new answer" }], timestamp: 3 },
+    ];
+    const mockClient = {
+      request: vi.fn().mockResolvedValue({ messages, thinkingLevel: "low" }),
+    };
+    const state = createState({
+      client: mockClient as unknown as ChatState["client"],
+      connected: true,
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([messages[1], messages[2]]);
+  });
+
+  it("merges adjacent assistant history entries when the newer one extends the older text", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "让我先检查控制UI的具体显示情况。" }],
+        timestamp: 1,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "让我先检查控制UI的具体显示情况。然后再执行相应的操作。" }],
+        timestamp: 2,
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "最终结论" }],
+        timestamp: 3,
+      },
+    ];
+    const mockClient = {
+      request: vi.fn().mockResolvedValue({ messages, thinkingLevel: "low" }),
+    };
+    const state = createState({
+      client: mockClient as unknown as ChatState["client"],
+      connected: true,
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([messages[1], messages[2]]);
+  });
+
+  it("merges adjacent assistant history entries that share the same __openclaw id", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "短回复" }],
+        timestamp: 1,
+        __openclaw: { id: "msg-1" },
+      },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "短回复，带更多细节" }],
+        timestamp: 2,
+        __openclaw: { id: "msg-1" },
+      },
+    ];
+    const mockClient = {
+      request: vi.fn().mockResolvedValue({ messages, thinkingLevel: "low" }),
+    };
+    const state = createState({
+      client: mockClient as unknown as ChatState["client"],
+      connected: true,
+    });
+
+    await loadChatHistory(state);
+
+    expect(state.chatMessages).toEqual([messages[1]]);
   });
 });
 
@@ -584,6 +895,28 @@ describe("sendChatMessage", () => {
 });
 
 describe("abortChatRun", () => {
+  it("clears stale local run state after a successful abort request", async () => {
+    const request = vi.fn().mockResolvedValue({ ok: true, aborted: false, runIds: [] });
+    const state = createState({
+      connected: true,
+      chatRunId: "run-1",
+      chatSending: true,
+      chatStreamStartedAt: 123,
+      client: { request } as unknown as ChatState["client"],
+    });
+
+    const result = await abortChatRun(state);
+
+    expect(result).toBe(true);
+    expect(request).toHaveBeenCalledWith("chat.abort", {
+      sessionKey: "main",
+      runId: "run-1",
+    });
+    expect(state.chatRunId).toBeNull();
+    expect(state.chatSending).toBe(false);
+    expect(state.chatStreamStartedAt).toBeNull();
+  });
+
   it("formats structured non-auth connect failures for chat abort", async () => {
     // Abort now shares the same structured connect-error formatter as send.
     const request = vi.fn().mockRejectedValue(

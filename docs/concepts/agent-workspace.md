@@ -105,7 +105,7 @@ These are the standard files OpenClaw expects inside the workspace:
   - Recommended to read today + yesterday on session start.
 
 - `MEMORY.md` (optional)
-  - Curated long-term memory.
+  - Curated long-term memory for the legacy file-backed lane.
   - Only load in the main, private session (not shared/group contexts).
 
 See [Memory](/concepts/memory) for the workflow and automatic memory flush.

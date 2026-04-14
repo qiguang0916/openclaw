@@ -1,10 +1,12 @@
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   acquireLocalHeavyCheckLockSync,
   applyLocalOxlintPolicy,
   applyLocalTsgoPolicy,
+  resolveLocalHeavyCheckLocksDirs,
 } from "../../scripts/lib/local-heavy-check-runtime.mjs";
 import { createScriptTestHarness } from "./test-helpers.js";
 
@@ -113,5 +115,58 @@ describe("local-heavy-check-runtime", () => {
 
     release();
     expect(fs.existsSync(lockDir)).toBe(false);
+  });
+
+  it("falls back to a temp lock directory when the git common dir is not writable", () => {
+    const cwd = createTempDir("openclaw-local-heavy-check-");
+    const [primaryLocksDir, fallbackLocksDir] = resolveLocalHeavyCheckLocksDirs(cwd, makeEnv());
+    const originalMkdirSync = fs.mkdirSync.bind(fs);
+    const mkdirSync = vi.spyOn(fs, "mkdirSync");
+
+    mkdirSync.mockImplementation(((targetPath: fs.PathLike, options?: fs.MakeDirectoryOptions) => {
+      if (path.resolve(String(targetPath)) === path.resolve(primaryLocksDir)) {
+        const err = new Error("permission denied") as NodeJS.ErrnoException;
+        err.code = "EPERM";
+        throw err;
+      }
+      return originalMkdirSync(targetPath, options);
+    }) as typeof fs.mkdirSync);
+
+    const release = acquireLocalHeavyCheckLockSync({
+      cwd,
+      env: makeEnv(),
+      toolName: "test",
+    });
+
+    const fallbackLockDir = path.join(fallbackLocksDir, "heavy-check.lock");
+    const owner = JSON.parse(fs.readFileSync(path.join(fallbackLockDir, "owner.json"), "utf8"));
+    expect(owner.pid).toBe(process.pid);
+    expect(owner.tool).toBe("test");
+    expect(fallbackLocksDir.startsWith(path.join(os.tmpdir(), "openclaw-local-checks"))).toBe(true);
+
+    release();
+    expect(fs.existsSync(fallbackLockDir)).toBe(false);
+  });
+
+  it("falls back to a temp lock directory when creating the lock dir is denied", () => {
+    const cwd = createTempDir("openclaw-local-heavy-check-");
+    const [primaryLocksDir, fallbackLocksDir] = resolveLocalHeavyCheckLocksDirs(cwd, makeEnv());
+    fs.mkdirSync(primaryLocksDir, { recursive: true });
+    fs.chmodSync(primaryLocksDir, 0o500);
+
+    const release = acquireLocalHeavyCheckLockSync({
+      cwd,
+      env: makeEnv(),
+      toolName: "test",
+    });
+
+    const fallbackLockDir = path.join(fallbackLocksDir, "heavy-check.lock");
+    const owner = JSON.parse(fs.readFileSync(path.join(fallbackLockDir, "owner.json"), "utf8"));
+    expect(owner.pid).toBe(process.pid);
+    expect(owner.tool).toBe("test");
+
+    release();
+    fs.chmodSync(primaryLocksDir, 0o700);
+    expect(fs.existsSync(fallbackLockDir)).toBe(false);
   });
 });

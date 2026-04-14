@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/config.js";
 import { writeWorkspaceFile } from "../../../test-helpers/workspace.js";
 import { createHookEvent } from "../../hooks.js";
@@ -14,6 +14,18 @@ import {
 // Avoid calling the embedded Pi agent (global command lane); keep this unit test deterministic.
 vi.mock("../../llm-slug-generator.js", () => ({
   generateSlugViaLLM: vi.fn().mockResolvedValue("simple-math"),
+}));
+
+const mempalaceSessionMemory = vi.hoisted(() => ({
+  shouldUse: vi.fn((..._args: unknown[]) => false),
+  save: vi.fn(async (..._args: unknown[]): Promise<unknown> => undefined),
+}));
+
+vi.mock("../../../../extensions/mempalace-memory/api.js", () => ({
+  shouldUseMempalaceSessionMemory: (...args: unknown[]) =>
+    mempalaceSessionMemory.shouldUse.apply(undefined, args),
+  saveSessionMemoryToMempalace: (...args: unknown[]) =>
+    mempalaceSessionMemory.save.apply(undefined, args),
 }));
 
 let handler: typeof import("./handler.js").default;
@@ -30,6 +42,12 @@ async function createCaseWorkspace(prefix = "case"): Promise<string> {
 beforeAll(async () => {
   ({ default: handler } = await import("./handler.js"));
   suiteWorkspaceRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-session-memory-"));
+});
+
+beforeEach(() => {
+  mempalaceSessionMemory.shouldUse.mockReset();
+  mempalaceSessionMemory.save.mockReset();
+  mempalaceSessionMemory.shouldUse.mockReturnValue(false);
 });
 
 afterAll(async () => {
@@ -90,7 +108,7 @@ async function runNewWithPreviousSessionEntry(params: {
   await handler(event);
 
   const memoryDir = path.join(params.tempDir, "memory");
-  const files = await fs.readdir(memoryDir);
+  const files = await fs.readdir(memoryDir).catch(() => []);
   const memoryContent =
     files.length > 0 ? await fs.readFile(path.join(memoryDir, files[0]), "utf-8") : "";
   return { files, memoryContent };
@@ -245,6 +263,70 @@ describe("session-memory hook", () => {
     expect(files.length).toBe(1);
     expect(memoryContent).toContain("user: Please reset and keep notes");
     expect(memoryContent).toContain("assistant: Captured before reset");
+  });
+
+  it("writes session memory to MemPalace when the active memory slot is mempalace-memory", async () => {
+    mempalaceSessionMemory.shouldUse.mockReturnValue(true);
+    mempalaceSessionMemory.save.mockResolvedValue({
+      palacePath: "/Users/test/.mempalace-data",
+      wing: "OpenClaw Sessions",
+      room: "main",
+      drawerId: "drawer_123",
+    });
+
+    const sessionContent = createMockSessionContent([
+      { role: "user", content: "Remember this across resets" },
+      { role: "assistant", content: "Stored in MemPalace" },
+    ]);
+    const { files, memoryContent } = await runNewWithPreviousSession({
+      sessionContent,
+      cfg: (tempDir) =>
+        ({
+          agents: { defaults: { workspace: tempDir } },
+          plugins: {
+            slots: { memory: "mempalace-memory" },
+            entries: { "mempalace-memory": { enabled: true } },
+          },
+        }) satisfies OpenClawConfig,
+    });
+
+    expect(files).toEqual([]);
+    expect(memoryContent).toBe("");
+    expect(mempalaceSessionMemory.save).toHaveBeenCalledTimes(1);
+    expect(mempalaceSessionMemory.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "main",
+        slug: expect.any(String),
+        sessionId: "test-123",
+        entry: expect.stringContaining("user: Remember this across resets"),
+      }),
+    );
+  });
+
+  it("falls back to workspace file memory if the MemPalace write fails", async () => {
+    mempalaceSessionMemory.shouldUse.mockReturnValue(true);
+    mempalaceSessionMemory.save.mockRejectedValue(new Error("mcp offline"));
+
+    const sessionContent = createMockSessionContent([
+      { role: "user", content: "Fallback if MemPalace is unavailable" },
+      { role: "assistant", content: "Use the legacy file so nothing is lost" },
+    ]);
+    const { files, memoryContent } = await runNewWithPreviousSession({
+      sessionContent,
+      cfg: (tempDir) =>
+        ({
+          agents: { defaults: { workspace: tempDir } },
+          plugins: {
+            slots: { memory: "mempalace-memory" },
+            entries: { "mempalace-memory": { enabled: true } },
+          },
+        }) satisfies OpenClawConfig,
+    });
+
+    expect(mempalaceSessionMemory.save).toHaveBeenCalledTimes(1);
+    expect(files.length).toBe(1);
+    expect(memoryContent).toContain("user: Fallback if MemPalace is unavailable");
+    expect(memoryContent).toContain("assistant: Use the legacy file so nothing is lost");
   });
 
   it("prefers workspaceDir from hook context when sessionKey points at main", async () => {

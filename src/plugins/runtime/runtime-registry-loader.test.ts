@@ -5,8 +5,8 @@ const getActivePluginRegistryMock = vi.fn();
 const resolveConfiguredChannelPluginIdsMock = vi.fn();
 const resolveChannelPluginIdsMock = vi.fn();
 const applyPluginAutoEnableMock = vi.fn();
-const resolveAgentWorkspaceDirMock = vi.fn(() => "/resolved-workspace");
-const resolveDefaultAgentIdMock = vi.fn(() => "default");
+const resolveAgentWorkspaceDirMock = vi.fn((..._args: unknown[]) => "/resolved-workspace");
+const resolveDefaultAgentIdMock = vi.fn((..._args: unknown[]) => "default");
 
 let ensurePluginRegistryLoaded: typeof import("./runtime-registry-loader.js").ensurePluginRegistryLoaded;
 let resetPluginRegistryLoadedForTests: typeof import("./runtime-registry-loader.js").__testing.resetPluginRegistryLoadedForTests;

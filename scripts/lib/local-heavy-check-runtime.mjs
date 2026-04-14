@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -90,10 +91,19 @@ export function acquireLocalHeavyCheckLockSync(params) {
     return () => {};
   }
 
-  const commonDir = resolveGitCommonDir(params.cwd);
-  const locksDir = path.join(commonDir, "openclaw-local-checks");
-  const lockDir = path.join(locksDir, `${params.lockName ?? "heavy-check"}.lock`);
-  const ownerPath = path.join(lockDir, "owner.json");
+  const [primaryLocksDir, fallbackLocksDir] = resolveLocalHeavyCheckLocksDirs(params.cwd, env);
+  const lockName = params.lockName ?? "heavy-check";
+  let locksDir = prepareLocalHeavyCheckLocksDir(primaryLocksDir);
+  if (locksDir === null) {
+    locksDir = prepareLocalHeavyCheckLocksDir(fallbackLocksDir);
+  }
+  if (locksDir === null) {
+    throw new Error(
+      `[${params.toolName}] could not create a local heavy-check lock directory in either ${primaryLocksDir} or ${fallbackLocksDir}.`,
+    );
+  }
+  let lockDir = path.join(locksDir, `${lockName}.lock`);
+  let ownerPath = path.join(lockDir, "owner.json");
   const timeoutMs = readPositiveInt(
     env.OPENCLAW_HEAVY_CHECK_LOCK_TIMEOUT_MS,
     DEFAULT_LOCK_TIMEOUT_MS,
@@ -111,8 +121,6 @@ export function acquireLocalHeavyCheckLockSync(params) {
   let waitingLogged = false;
   let lastProgressAt = 0;
 
-  fs.mkdirSync(locksDir, { recursive: true });
-
   for (;;) {
     try {
       fs.mkdirSync(lockDir);
@@ -127,6 +135,15 @@ export function acquireLocalHeavyCheckLockSync(params) {
         fs.rmSync(lockDir, { recursive: true, force: true });
       };
     } catch (error) {
+      if (isPermissionDeniedError(error) && locksDir !== fallbackLocksDir) {
+        locksDir = prepareLocalHeavyCheckLocksDir(fallbackLocksDir);
+        if (locksDir === null) {
+          throw error;
+        }
+        lockDir = path.join(locksDir, `${lockName}.lock`);
+        ownerPath = path.join(lockDir, "owner.json");
+        continue;
+      }
       if (!isAlreadyExistsError(error)) {
         throw error;
       }
@@ -189,6 +206,19 @@ export function resolveGitCommonDir(cwd) {
   return path.join(cwd, ".git");
 }
 
+export function resolveLocalHeavyCheckLocksDirs(cwd, env = process.env) {
+  const overrideDir = env.OPENCLAW_HEAVY_CHECK_LOCK_DIR?.trim();
+  if (overrideDir) {
+    return [path.resolve(overrideDir), path.resolve(overrideDir)];
+  }
+
+  const commonDir = resolveGitCommonDir(cwd);
+  const primaryDir = path.join(commonDir, "openclaw-local-checks");
+  const repoHash = createHash("sha1").update(path.resolve(commonDir)).digest("hex").slice(0, 12);
+  const fallbackDir = path.join(os.tmpdir(), "openclaw-local-checks", repoHash);
+  return [primaryDir, fallbackDir];
+}
+
 function insertBeforeSeparator(args, ...items) {
   if (items.length > 0 && hasFlag(args, items[0])) {
     return;
@@ -197,6 +227,18 @@ function insertBeforeSeparator(args, ...items) {
   const separatorIndex = args.indexOf("--");
   const insertIndex = separatorIndex === -1 ? args.length : separatorIndex;
   args.splice(insertIndex, 0, ...items);
+}
+
+function prepareLocalHeavyCheckLocksDir(locksDir) {
+  try {
+    fs.mkdirSync(locksDir, { recursive: true });
+    return locksDir;
+  } catch (error) {
+    if (isPermissionDeniedError(error)) {
+      return null;
+    }
+    throw error;
+  }
 }
 
 function readLocalCheckMode(env) {
@@ -241,6 +283,15 @@ function readOwnerFile(ownerPath) {
 
 function isAlreadyExistsError(error) {
   return Boolean(error && typeof error === "object" && "code" in error && error.code === "EEXIST");
+}
+
+function isPermissionDeniedError(error) {
+  return Boolean(
+    error &&
+    typeof error === "object" &&
+    "code" in error &&
+    (error.code === "EACCES" || error.code === "EPERM" || error.code === "EROFS"),
+  );
 }
 
 function shouldReclaimLock({ owner, lockDir, staleLockMs }) {

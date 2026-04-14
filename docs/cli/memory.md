@@ -10,7 +10,18 @@ title: "memory"
 # `openclaw memory`
 
 Manage semantic memory indexing and search.
-Provided by the active memory plugin (default: `memory-core`; set `plugins.slots.memory = "none"` to disable).
+Provided by the active memory plugin.
+
+Current deployment note:
+
+- when `plugins.slots.memory = "mempalace-memory"`, this command surface is
+  MemPalace-backed and is the primary memory path
+- `memory-core` remains a legacy file-backed compatibility lane
+- set `plugins.slots.memory = "none"` to disable active memory entirely
+- advanced MemPalace-native tool flows are also available to agents when the
+  MemPalace plugin is active, including raw write/KG/diary tools such as
+  `mempalace_add_drawer`, `mempalace_kg_query`, `mempalace_kg_add`, and
+  `mempalace_diary_write`
 
 Related:
 
@@ -26,6 +37,14 @@ openclaw memory status --fix
 openclaw memory index --force
 openclaw memory search "meeting notes"
 openclaw memory search --query "deployment" --max-results 20
+openclaw memory dream status --agent main
+openclaw memory dream run --agent main
+openclaw memory dream verify "meeting notes" --agent main
+```
+
+Legacy `memory-core` compatibility commands:
+
+```bash
 openclaw memory promote --limit 10 --min-score 0.75
 openclaw memory promote --apply
 openclaw memory promote --json --min-recall-count 0 --min-unique-queries 0
@@ -33,6 +52,11 @@ openclaw memory promote-explain "router vlan"
 openclaw memory promote-explain "router vlan" --json
 openclaw memory rem-harness
 openclaw memory rem-harness --json
+```
+
+Additional status/index examples:
+
+```bash
 openclaw memory status --json
 openclaw memory status --deep --index
 openclaw memory status --deep --index --verbose
@@ -69,6 +93,10 @@ openclaw memory index --agent main --verbose
 - `--json`: print JSON results.
 
 `memory promote`:
+
+Legacy file-backed `memory-core` workflow only. When `mempalace-memory` owns
+the active memory slot, prefer `openclaw memory dream status`, `openclaw
+memory dream run`, and `openclaw memory dream verify`.
 
 Preview and apply short-term memory promotions.
 
@@ -121,9 +149,24 @@ openclaw memory rem-harness [--agent <id>] [--include-promoted] [--json]
 
 ## Dreaming (experimental)
 
-Dreaming is the background memory consolidation system with three cooperative
-phases: **light** (sort/stage short-term material), **deep** (promote durable
-facts into `MEMORY.md`), and **REM** (reflect and surface themes).
+Dreaming now has two different stories:
+
+- **MemPalace-native dreaming** is the active primary path when
+  `mempalace-memory` owns the memory slot. Use:
+  - `openclaw memory dream status`
+  - `openclaw memory dream run`
+  - `openclaw memory dream verify "<query>"`
+- **Legacy file-backed dreaming** remains under `memory-core` for compatibility.
+
+MemPalace-native dreaming uses the same three conceptual phases, but writes
+through MemPalace outputs:
+
+- **light** -> diary continuity
+- **REM** -> associative drawer synthesis
+- **deep** -> durable KG reinforcement
+
+Legacy `memory-core` dreaming remains the path that writes to `MEMORY.md` and
+`DREAMS.md`.
 
 - Enable with `plugins.entries.memory-core.config.dreaming.enabled: true`.
 - Toggle from chat with `/dreaming on|off` (or inspect with `/dreaming status`).
@@ -140,7 +183,7 @@ Default scheduling:
 - **Sweep cadence**: `dreaming.frequency = 0 3 * * *`
 - **Deep thresholds**: `minScore=0.8`, `minRecallCount=3`, `minUniqueQueries=3`, `recencyHalfLifeDays=14`, `maxAgeDays=30`
 
-Example:
+Legacy `memory-core` example:
 
 ```json
 {
@@ -164,5 +207,5 @@ Notes:
 - `memory status` includes any extra paths configured via `memorySearch.extraPaths`.
 - If effectively active memory remote API key fields are configured as SecretRefs, the command resolves those values from the active gateway snapshot. If gateway is unavailable, the command fails fast.
 - Gateway version skew note: this command path requires a gateway that supports `secrets.resolve`; older gateways return an unknown-method error.
-- Tune scheduled sweep cadence with `dreaming.frequency`. Deep promotion policy is otherwise internal; use CLI flags on `memory promote` when you need one-off manual overrides.
+- Tune scheduled sweep cadence with `dreaming.frequency` only for the legacy `memory-core` lane. For the active MemPalace path, use `openclaw memory dream status|run|verify`.
 - See [Dreaming](/concepts/dreaming) for full phase descriptions and configuration reference.

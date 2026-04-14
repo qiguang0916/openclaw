@@ -17,7 +17,11 @@ import { generateUUID } from "./uuid.ts";
 
 export type ChatHost = {
   client: GatewayBrowserClient | null;
+  chatLastActivityAt?: number;
+  chatLastActivityKind?: string | null;
   chatMessages: unknown[];
+  chatProgressTick?: number;
+  chatRunStartedAt?: number;
   chatStream: string | null;
   connected: boolean;
   chatMessage: string;
@@ -80,8 +84,12 @@ export async function handleAbortChat(host: ChatHost) {
   if (!host.connected) {
     return;
   }
+  const runId = host.chatRunId;
   host.chatMessage = "";
-  await abortChatRun(host as unknown as OpenClawApp);
+  const ok = await abortChatRun(host as unknown as OpenClawApp);
+  if (ok) {
+    clearPendingQueueItemsForRun(host, runId ?? undefined);
+  }
 }
 
 function enqueueChatMessage(
@@ -213,6 +221,33 @@ export function clearPendingQueueItemsForRun(host: ChatHost, runId: string | und
     return;
   }
   host.chatQueue = host.chatQueue.filter((item) => item.pendingRunId !== runId);
+}
+
+export async function resetChatSession(host: ChatHost) {
+  if (!host.client || !host.connected) {
+    return false;
+  }
+  host.chatSending = true;
+  host.lastError = null;
+  try {
+    await host.client.request("sessions.reset", {
+      key: host.sessionKey,
+      emitLifecycleHooks: false,
+    });
+    host.chatMessages = [];
+    host.chatStream = null;
+    (host as ChatHost & { chatStreamStartedAt?: number | null }).chatStreamStartedAt = null;
+    host.chatRunId = null;
+    host.chatQueue = [];
+    await loadChatHistory(host as unknown as OpenClawApp);
+    return true;
+  } catch (err) {
+    host.lastError = String(err);
+    return false;
+  } finally {
+    host.chatSending = false;
+    scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
+  }
 }
 
 export async function handleSendChat(
@@ -366,19 +401,7 @@ async function dispatchSlashCommand(
 }
 
 async function clearChatHistory(host: ChatHost) {
-  if (!host.client || !host.connected) {
-    return;
-  }
-  try {
-    await host.client.request("sessions.reset", { key: host.sessionKey });
-    host.chatMessages = [];
-    host.chatStream = null;
-    host.chatRunId = null;
-    await loadChatHistory(host as unknown as OpenClawApp);
-  } catch (err) {
-    host.lastError = String(err);
-  }
-  scheduleChatScroll(host as unknown as Parameters<typeof scheduleChatScroll>[0]);
+  await resetChatSession(host);
 }
 
 function injectCommandResult(host: ChatHost, content: string) {

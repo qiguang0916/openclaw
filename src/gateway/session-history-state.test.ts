@@ -75,4 +75,80 @@ describe("SessionHistorySseState", () => {
     expect(snapshot.history.messages[0]?.__openclaw?.seq).toBe(2);
     expect(snapshot.rawTranscriptSeq).toBe(2);
   });
+
+  test("collapses progressive assistant snapshots separated by tool results in history snapshots", () => {
+    const snapshot = buildSessionHistorySnapshot({
+      rawMessages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "先检查配置。" }],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "toolResult",
+          toolCallId: "tool-1",
+          toolName: "read",
+          content: [{ type: "text", text: "MEMORY.md" }],
+          __openclaw: { seq: 2 },
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "先检查配置。再检查 MCP 服务状态。" }],
+          __openclaw: { seq: 3 },
+        },
+      ],
+    });
+
+    expect(snapshot.history.messages).toEqual([
+      expect.objectContaining({
+        role: "toolResult",
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        content: [{ type: "text", text: "先检查配置。再检查 MCP 服务状态。" }],
+      }),
+    ]);
+  });
+
+  test("collapses progressive assistant snapshots during inline SSE appends", () => {
+    const state = SessionHistorySseState.fromRawSnapshot({
+      target: { sessionId: "sess-main" },
+      rawMessages: [
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "先检查配置。" }],
+          __openclaw: { seq: 1 },
+        },
+        {
+          role: "toolResult",
+          toolCallId: "tool-1",
+          toolName: "read",
+          content: [{ type: "text", text: "MEMORY.md" }],
+          __openclaw: { seq: 2 },
+        },
+      ],
+    });
+
+    const appended = state.appendInlineMessage({
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "先检查配置。再检查 MCP 服务状态。" }],
+      },
+      messageId: "msg-3",
+    });
+
+    expect(state.snapshot().messages).toEqual([
+      expect.objectContaining({
+        role: "toolResult",
+      }),
+      expect.objectContaining({
+        role: "assistant",
+        __openclaw: { id: "msg-3", seq: 3 },
+      }),
+    ]);
+    expect(appended?.message).toMatchObject({
+      role: "assistant",
+      __openclaw: { id: "msg-3", seq: 3 },
+    });
+  });
 });

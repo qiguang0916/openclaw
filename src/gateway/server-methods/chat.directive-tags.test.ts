@@ -21,6 +21,7 @@ const mockState = vi.hoisted(() => ({
   dispatchError: null as Error | null,
   triggerAgentRunStart: false,
   agentRunId: "run-agent-1",
+  agentRunIds: null as string[] | null,
   sessionEntry: {} as Record<string, unknown>,
   lastDispatchCtx: undefined as MsgContext | undefined,
   lastDispatchImages: undefined as Array<{ mimeType: string; data: string }> | undefined,
@@ -94,7 +95,10 @@ vi.mock("../../auto-reply/dispatch.js", () => ({
         throw mockState.dispatchError;
       }
       if (mockState.triggerAgentRunStart) {
-        params.replyOptions?.onAgentRunStart?.(mockState.agentRunId);
+        const runIds = mockState.agentRunIds ?? [mockState.agentRunId];
+        for (const runId of runIds) {
+          params.replyOptions?.onAgentRunStart?.(runId);
+        }
       }
       params.dispatcher.sendFinalReply({ text: mockState.finalText });
       params.dispatcher.markComplete();
@@ -238,6 +242,7 @@ function createChatContext(): Pick<
   | "chatRunBuffers"
   | "chatDeltaSentAt"
   | "chatAbortedRuns"
+  | "addChatRun"
   | "removeChatRun"
   | "dedupe"
   | "loadGatewayModelCatalog"
@@ -252,6 +257,7 @@ function createChatContext(): Pick<
     chatRunBuffers: new Map(),
     chatDeltaSentAt: new Map(),
     chatAbortedRuns: new Map(),
+    addChatRun: vi.fn(),
     removeChatRun: vi.fn(),
     dedupe: new Map(),
     loadGatewayModelCatalog: async () => [
@@ -355,6 +361,7 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
     mockState.mainSessionKey = "main";
     mockState.triggerAgentRunStart = false;
     mockState.agentRunId = "run-agent-1";
+    mockState.agentRunIds = null;
     mockState.sessionEntry = {};
     mockState.lastDispatchCtx = undefined;
     mockState.lastDispatchImages = undefined;
@@ -1485,6 +1492,37 @@ describe("chat directive tag stripping for non-streaming final payloads", () => 
         content: "hello from dashboard",
         timestamp: expect.any(Number),
       },
+    });
+    expect(context.addChatRun).toHaveBeenCalledWith(mockState.agentRunId, {
+      sessionKey: "main",
+      clientRunId: "idem-user-transcript-agent-run",
+    });
+  });
+
+  it("re-links chat runs when a retry starts a replacement agent run", async () => {
+    createTranscriptFixture("openclaw-chat-send-retry-agent-run-");
+    mockState.finalText = "ok";
+    mockState.triggerAgentRunStart = true;
+    mockState.agentRunIds = ["run-agent-retry-1", "run-agent-retry-2"];
+    const respond = vi.fn();
+    const context = createChatContext();
+
+    await runNonStreamingChatSend({
+      context,
+      respond,
+      idempotencyKey: "idem-retry-agent-run",
+      message: "hello again",
+      expectBroadcast: false,
+    });
+
+    expect(context.removeChatRun).toHaveBeenCalledWith(
+      "run-agent-retry-1",
+      "idem-retry-agent-run",
+      "main",
+    );
+    expect(context.addChatRun).toHaveBeenCalledWith("run-agent-retry-2", {
+      sessionKey: "main",
+      clientRunId: "idem-retry-agent-run",
     });
   });
 

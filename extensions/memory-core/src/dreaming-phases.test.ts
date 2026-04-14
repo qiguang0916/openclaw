@@ -253,38 +253,41 @@ describe("memory-core dreaming phases", () => {
   });
 
   it("ingests recent daily memory files even before recall traffic exists", async () => {
-    const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
-    await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceDir, "memory", "2026-04-05.md"),
-      ["# 2026-04-05", "", "- Move backups to S3 Glacier.", "- Keep retention at 365 days."].join(
-        "\n",
-      ),
-      "utf-8",
-    );
+    await withDreamingTestClock(async () => {
+      const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
+      await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", "2026-04-05.md"),
+        ["# 2026-04-05", "", "- Move backups to S3 Glacier.", "- Keep retention at 365 days."].join(
+          "\n",
+        ),
+        "utf-8",
+      );
 
-    const before = await rankShortTermPromotionCandidates({
-      workspaceDir,
-      minScore: 0,
-      minRecallCount: 0,
-      minUniqueQueries: 0,
-      nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
-    });
-    expect(before).toHaveLength(0);
+      setDreamingTestTime(0);
+      const before = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-05T10:00:00.000Z"),
+      });
+      expect(before).toHaveLength(0);
 
-    const { beforeAgentReply } = createHarness(
-      {
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                  phases: {
-                    light: {
-                      enabled: true,
-                      limit: 20,
-                      lookbackDays: 2,
+      const { beforeAgentReply } = createHarness(
+        {
+          plugins: {
+            entries: {
+              "memory-core": {
+                config: {
+                  dreaming: {
+                    enabled: true,
+                    phases: {
+                      light: {
+                        enabled: true,
+                        limit: 20,
+                        lookbackDays: 2,
+                      },
                     },
                   },
                 },
@@ -292,59 +295,62 @@ describe("memory-core dreaming phases", () => {
             },
           },
         },
-      },
-      workspaceDir,
-    );
+        workspaceDir,
+      );
 
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_light_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
+      setDreamingTestTime(5);
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_light_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
 
-    const after = await rankShortTermPromotionCandidates({
-      workspaceDir,
-      minScore: 0,
-      minRecallCount: 0,
-      minUniqueQueries: 0,
-      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      const after = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      });
+      expect(after).toHaveLength(1);
+      expect(after[0]?.dailyCount).toBeGreaterThan(0);
+      expect(after[0]?.startLine).toBe(3);
+      expect(after[0]?.endLine).toBe(4);
+      expect(after[0]?.snippet).toContain("Move backups to S3 Glacier.");
+      expect(after[0]?.snippet).toContain("Keep retention at 365 days.");
     });
-    expect(after).toHaveLength(1);
-    expect(after[0]?.dailyCount).toBeGreaterThan(0);
-    expect(after[0]?.startLine).toBe(3);
-    expect(after[0]?.endLine).toBe(4);
-    expect(after[0]?.snippet).toContain("Move backups to S3 Glacier.");
-    expect(after[0]?.snippet).toContain("Keep retention at 365 days.");
   });
 
   it("keeps section context when chunking durable daily notes", async () => {
-    const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
-    await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceDir, "memory", "2026-04-05.md"),
-      [
-        "# 2026-04-05",
-        "",
-        "## Emma Rees",
-        "- She asked for more space after the last exchange.",
-        "- Better to keep messages short and low-pressure.",
-        "- Re-engagement should be time-bounded and optional.",
-      ].join("\n"),
-      "utf-8",
-    );
+    await withDreamingTestClock(async () => {
+      const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
+      await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", "2026-04-05.md"),
+        [
+          "# 2026-04-05",
+          "",
+          "## Emma Rees",
+          "- She asked for more space after the last exchange.",
+          "- Better to keep messages short and low-pressure.",
+          "- Re-engagement should be time-bounded and optional.",
+        ].join("\n"),
+        "utf-8",
+      );
 
-    const { beforeAgentReply } = createHarness(
-      {
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                  phases: {
-                    light: {
-                      enabled: true,
-                      limit: 20,
-                      lookbackDays: 2,
+      const { beforeAgentReply } = createHarness(
+        {
+          plugins: {
+            entries: {
+              "memory-core": {
+                config: {
+                  dreaming: {
+                    enabled: true,
+                    phases: {
+                      light: {
+                        enabled: true,
+                        limit: 20,
+                        lookbackDays: 2,
+                      },
                     },
                   },
                 },
@@ -352,61 +358,64 @@ describe("memory-core dreaming phases", () => {
             },
           },
         },
-      },
-      workspaceDir,
-    );
+        workspaceDir,
+      );
 
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_light_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
+      setDreamingTestTime(5);
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_light_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
 
-    const after = await rankShortTermPromotionCandidates({
-      workspaceDir,
-      minScore: 0,
-      minRecallCount: 0,
-      minUniqueQueries: 0,
-      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      const after = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      });
+      expect(after).toHaveLength(1);
+      expect(after[0]?.startLine).toBe(4);
+      expect(after[0]?.endLine).toBe(6);
+      expect(after[0]?.snippet).toContain("Emma Rees:");
+      expect(after[0]?.snippet).toContain("She asked for more space");
+      expect(after[0]?.snippet).toContain("messages short and low-pressure");
     });
-    expect(after).toHaveLength(1);
-    expect(after[0]?.startLine).toBe(4);
-    expect(after[0]?.endLine).toBe(6);
-    expect(after[0]?.snippet).toContain("Emma Rees:");
-    expect(after[0]?.snippet).toContain("She asked for more space");
-    expect(after[0]?.snippet).toContain("messages short and low-pressure");
   });
 
   it("drops generic day headings but keeps meaningful section labels", async () => {
-    const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
-    await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceDir, "memory", "2026-04-05.md"),
-      [
-        "# Friday, April 5, 2026",
-        "",
-        "## Morning",
-        "- Reviewed travel timing and calendar placement.",
-        "",
-        "## Emma Rees",
-        "- She prefers direct plans over open-ended maybes.",
-        "- Better to offer one concrete time window.",
-      ].join("\n"),
-      "utf-8",
-    );
+    await withDreamingTestClock(async () => {
+      const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
+      await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", "2026-04-05.md"),
+        [
+          "# Friday, April 5, 2026",
+          "",
+          "## Morning",
+          "- Reviewed travel timing and calendar placement.",
+          "",
+          "## Emma Rees",
+          "- She prefers direct plans over open-ended maybes.",
+          "- Better to offer one concrete time window.",
+        ].join("\n"),
+        "utf-8",
+      );
 
-    const { beforeAgentReply } = createHarness(
-      {
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                  phases: {
-                    light: {
-                      enabled: true,
-                      limit: 20,
-                      lookbackDays: 2,
+      const { beforeAgentReply } = createHarness(
+        {
+          plugins: {
+            entries: {
+              "memory-core": {
+                config: {
+                  dreaming: {
+                    enabled: true,
+                    phases: {
+                      light: {
+                        enabled: true,
+                        limit: 20,
+                        lookbackDays: 2,
+                      },
                     },
                   },
                 },
@@ -414,72 +423,75 @@ describe("memory-core dreaming phases", () => {
             },
           },
         },
-      },
-      workspaceDir,
-    );
+        workspaceDir,
+      );
 
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_light_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
+      setDreamingTestTime(5);
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_light_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
 
-    const after = await rankShortTermPromotionCandidates({
-      workspaceDir,
-      minScore: 0,
-      minRecallCount: 0,
-      minUniqueQueries: 0,
-      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      const after = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      });
+      expect(after).toHaveLength(2);
+      expect(after.map((candidate) => candidate.snippet)).toEqual(
+        expect.arrayContaining([
+          "Reviewed travel timing and calendar placement.",
+          expect.stringContaining("Emma Rees:"),
+        ]),
+      );
+      for (const candidate of after) {
+        expect(candidate.snippet).not.toContain("Friday, April 5, 2026:");
+        expect(candidate.snippet).not.toContain("Morning:");
+      }
     });
-    expect(after).toHaveLength(2);
-    expect(after.map((candidate) => candidate.snippet)).toEqual(
-      expect.arrayContaining([
-        "Reviewed travel timing and calendar placement.",
-        expect.stringContaining("Emma Rees:"),
-      ]),
-    );
-    for (const candidate of after) {
-      expect(candidate.snippet).not.toContain("Friday, April 5, 2026:");
-      expect(candidate.snippet).not.toContain("Morning:");
-    }
   });
 
   it("splits noisy daily notes into a few coherent chunks instead of one line per item", async () => {
-    const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
-    await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
-    await fs.writeFile(
-      path.join(workspaceDir, "memory", "2026-04-05.md"),
-      [
-        "# 2026-04-05",
-        "",
-        "## Operations",
-        "- Restarted the gateway after auth drift.",
-        "- Tokens now line up again.",
-        "",
-        "## Bex",
-        "- She prefers direct plans over open-ended maybes.",
-        "- Better to offer one concrete time window.",
-        "",
-        "11:30",
-        "",
-        "## Travel",
-        "- Flight lands at 08:10.",
-      ].join("\n"),
-      "utf-8",
-    );
+    await withDreamingTestClock(async () => {
+      const workspaceDir = await createTempWorkspace("openclaw-dreaming-phases-");
+      await fs.mkdir(path.join(workspaceDir, "memory"), { recursive: true });
+      await fs.writeFile(
+        path.join(workspaceDir, "memory", "2026-04-05.md"),
+        [
+          "# 2026-04-05",
+          "",
+          "## Operations",
+          "- Restarted the gateway after auth drift.",
+          "- Tokens now line up again.",
+          "",
+          "## Bex",
+          "- She prefers direct plans over open-ended maybes.",
+          "- Better to offer one concrete time window.",
+          "",
+          "11:30",
+          "",
+          "## Travel",
+          "- Flight lands at 08:10.",
+        ].join("\n"),
+        "utf-8",
+      );
 
-    const { beforeAgentReply } = createHarness(
-      {
-        plugins: {
-          entries: {
-            "memory-core": {
-              config: {
-                dreaming: {
-                  enabled: true,
-                  phases: {
-                    light: {
-                      enabled: true,
-                      limit: 20,
-                      lookbackDays: 2,
+      const { beforeAgentReply } = createHarness(
+        {
+          plugins: {
+            entries: {
+              "memory-core": {
+                config: {
+                  dreaming: {
+                    enabled: true,
+                    phases: {
+                      light: {
+                        enabled: true,
+                        limit: 20,
+                        lookbackDays: 2,
+                      },
                     },
                   },
                 },
@@ -487,34 +499,35 @@ describe("memory-core dreaming phases", () => {
             },
           },
         },
-      },
-      workspaceDir,
-    );
+        workspaceDir,
+      );
 
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_light_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
+      setDreamingTestTime(5);
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_light_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
 
-    const after = await rankShortTermPromotionCandidates({
-      workspaceDir,
-      minScore: 0,
-      minRecallCount: 0,
-      minUniqueQueries: 0,
-      nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      const after = await rankShortTermPromotionCandidates({
+        workspaceDir,
+        minScore: 0,
+        minRecallCount: 0,
+        minUniqueQueries: 0,
+        nowMs: Date.parse("2026-04-05T10:05:00.000Z"),
+      });
+      expect(after).toHaveLength(3);
+      expect(after.map((candidate) => candidate.snippet)).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining(
+            "Operations: Restarted the gateway after auth drift.; Tokens now line up again.",
+          ),
+          expect.stringContaining(
+            "Bex: She prefers direct plans over open-ended maybes.; Better to offer one concrete time window.",
+          ),
+          expect.stringContaining("Travel: Flight lands at 08:10."),
+        ]),
+      );
     });
-    expect(after).toHaveLength(3);
-    expect(after.map((candidate) => candidate.snippet)).toEqual(
-      expect.arrayContaining([
-        expect.stringContaining(
-          "Operations: Restarted the gateway after auth drift.; Tokens now line up again.",
-        ),
-        expect.stringContaining(
-          "Bex: She prefers direct plans over open-ended maybes.; Better to offer one concrete time window.",
-        ),
-        expect.stringContaining("Travel: Flight lands at 08:10."),
-      ]),
-    );
   });
 
   it("records light/rem signals that reinforce deep promotion ranking", async () => {
@@ -591,14 +604,17 @@ describe("memory-core dreaming phases", () => {
       workspaceDir,
     );
 
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_light_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
-    await beforeAgentReply(
-      { cleanedBody: "__openclaw_memory_core_rem_sleep__" },
-      { trigger: "heartbeat", workspaceDir },
-    );
+    await withDreamingTestClock(async () => {
+      setDreamingTestTime();
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_light_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
+      await beforeAgentReply(
+        { cleanedBody: "__openclaw_memory_core_rem_sleep__" },
+        { trigger: "heartbeat", workspaceDir },
+      );
+    });
 
     const reinforced = await rankShortTermPromotionCandidates({
       workspaceDir,

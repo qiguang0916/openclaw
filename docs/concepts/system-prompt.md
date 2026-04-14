@@ -101,12 +101,12 @@ Bootstrap files are trimmed and appended under **Project Context** so the model 
 - `USER.md`
 - `HEARTBEAT.md`
 - `BOOTSTRAP.md` (only on brand-new workspaces)
-- `MEMORY.md` when present, otherwise `memory.md` as a lowercase fallback
+- `MEMORY.md` when present, otherwise `memory.md` as a lowercase fallback in the legacy file-backed lane
 
 All of these files are **injected into the context window** on every turn, which
-means they consume tokens. Keep them concise — especially `MEMORY.md`, which can
-grow over time and lead to unexpectedly high context usage and more frequent
-compaction.
+means they consume tokens. Keep them concise — especially legacy `MEMORY.md`,
+which can grow over time and lead to unexpectedly high context usage and more
+frequent compaction.
 
 > **Note:** `memory/*.md` daily files are **not** injected automatically. They
 > are accessed on demand via the `memory_search` and `memory_get` tools, so they

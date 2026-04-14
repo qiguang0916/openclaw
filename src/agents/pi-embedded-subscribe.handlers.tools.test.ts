@@ -97,6 +97,24 @@ describe("handleToolExecutionStart read path checks", () => {
     expect(String(warn.mock.calls[0]?.[0] ?? "")).toContain("read tool called without path");
   });
 
+  it("warns when read tool path looks like a directory", async () => {
+    const { ctx, warn } = createTestContext();
+
+    const evt: ToolExecutionStartEvent = {
+      type: "tool_execution_start",
+      toolName: "read",
+      toolCallId: "tool-dir",
+      args: { path: "." },
+    };
+
+    await handleToolExecutionStart(ctx, evt);
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(String(warn.mock.calls[0]?.[0] ?? "")).toContain(
+      "read tool called with directory-like path",
+    );
+  });
+
   it("awaits onBlockReplyFlush before continuing tool start processing", async () => {
     const { ctx, onBlockReplyFlush } = createTestContext();
     let releaseFlush: (() => void) | undefined;

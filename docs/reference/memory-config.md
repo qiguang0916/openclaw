@@ -10,16 +10,20 @@ read_when:
 
 # Memory configuration reference
 
-This page lists every configuration knob for OpenClaw memory search. For
-conceptual overviews, see:
+This page lists every configuration knob for OpenClaw memory search. Most of
+these knobs apply to the legacy file-backed `memorySearch` lane (`memory-core`
+with builtin/QMD backends). MemPalace-native memory uses the active memory slot
+and its own plugin config surface for primary recall and dreaming.
+
+For conceptual overviews, see:
 
 - [Memory Overview](/concepts/memory) -- how memory works
-- [Builtin Engine](/concepts/memory-builtin) -- default SQLite backend
+- [Builtin Engine](/concepts/memory-builtin) -- legacy SQLite compatibility backend
 - [QMD Engine](/concepts/memory-qmd) -- local-first sidecar
 - [Memory Search](/concepts/memory-search) -- search pipeline and tuning
 
-All memory search settings live under `agents.defaults.memorySearch` in
-`openclaw.json` unless noted otherwise.
+Legacy file-backed memory-search settings live under `agents.defaults.memorySearch`
+in `openclaw.json` unless noted otherwise.
 
 ---
 
@@ -464,15 +468,22 @@ Default is DM-only. `match.keyPrefix` matches the normalized session key;
 
 ## Dreaming (experimental)
 
-Dreaming is configured under `plugins.entries.memory-core.config.dreaming`,
-not under `agents.defaults.memorySearch`.
+Dreaming is configured on the active memory plugin, not under
+`agents.defaults.memorySearch`.
+
+In this deployment:
+
+- MemPalace-native dreaming lives under
+  `plugins.entries.mempalace-memory.config.dreaming`
+- legacy file-backed `memory-core` dreaming lives under
+  `plugins.entries.memory-core.config.dreaming`
 
 Dreaming runs as one scheduled sweep and uses internal light/deep/REM phases as
 an implementation detail.
 
 For conceptual behavior and slash commands, see [Dreaming](/concepts/dreaming).
 
-### User settings
+### User settings (legacy `memory-core` lane)
 
 | Key         | Type      | Default     | Description                                       |
 | ----------- | --------- | ----------- | ------------------------------------------------- |
@@ -501,5 +512,6 @@ For conceptual behavior and slash commands, see [Dreaming](/concepts/dreaming).
 Notes:
 
 - Dreaming writes machine state to `memory/.dreams/`.
-- Dreaming writes human-readable narrative output to `DREAMS.md` (or existing `dreams.md`).
+- Legacy file-backed dreaming writes human-readable narrative output to `DREAMS.md` (or existing `dreams.md`).
+- MemPalace-native dreaming writes diary + drawer + KG outputs and still records events in `memory/.dreams/events.jsonl`.
 - The light/deep/REM phase policy and thresholds are internal behavior, not user-facing config.

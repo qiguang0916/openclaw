@@ -210,4 +210,51 @@ describe("summarizeToolResultForPersistence", () => {
     expect(summarizedText).not.toContain("Description");
     expect(summarizedText).toContain("omitted from persisted transcript");
   });
+
+  it("ignores wrapped continuation rows in plugins tables", () => {
+    const text = [
+      "Plugins (47/98 loaded)",
+      "Source roots:",
+      "  stock: /tmp/stock",
+      "  global: /tmp/global",
+      "",
+      "┌──────────────┬──────────┬──────────┬──────────┬────────────────────┬──────────┐",
+      "│ Name         │ ID       │ Format   │ Status   │ Source             │ Version  │",
+      "├──────────────┼──────────┼──────────┼──────────┼────────────────────┼──────────┤",
+      "│ MemPalace    │ mempalac │ openclaw │ loaded   │ /tmp/index.ts      │ 0.1.0    │",
+      "│ OpenClaw     │ e        │          │          │ recall memory      │          │",
+      "│ Integration  │          │          │          │ plugin             │          │",
+      "│ ACPX Runtime │ acpx     │ openclaw │ loaded   │ stock:acpx/index.js│ 2026.4.6 │",
+      "│ @openclaw/   │ alibaba  │ openclaw │ disabled │ stock:ali/index.js │ 2026.4.6 │",
+      "│ alibaba-     │          │          │          │ provider plugin    │          │",
+      `${"z".repeat(7_000)}`,
+    ].join("\n");
+
+    const message: ToolResultMessage = {
+      role: "toolResult",
+      toolCallId: "call_plugins_wrapped",
+      toolName: "exec",
+      isError: false,
+      timestamp: Date.now(),
+      content: [{ type: "text", text }],
+      details: {
+        status: "completed",
+        exitCode: 0,
+        aggregated: text,
+      },
+    };
+
+    const summarized = summarize(message, {
+      toolCallId: "call_plugins_wrapped",
+      toolName: "exec",
+      isSynthetic: false,
+    });
+
+    const summarizedText = (summarized.content[0] as { text: string }).text;
+    expect(summarizedText).toContain("Entries parsed: 3");
+    expect(summarizedText).toContain("Non-loaded / attention: alibaba");
+    expect(summarizedText).toContain("Sample plugins: MemPalace, ACPX Runtime, alibaba");
+    expect(summarizedText).not.toContain("mempalac");
+    expect(summarizedText).not.toContain("Integration");
+  });
 });

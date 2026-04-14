@@ -517,6 +517,14 @@ export function handleToolExecutionStart(
   ctx: ToolHandlerContext,
   evt: AgentEvent & { toolName: string; toolCallId: string; args: unknown },
 ) {
+  const looksLikeDirectoryReadPath = (filePath: string): boolean => {
+    const trimmed = filePath.trim();
+    if (!trimmed) {
+      return false;
+    }
+    return trimmed === "." || trimmed === ".." || /[\\/]$/u.test(trimmed);
+  };
+
   const continueAfterBlockReplyFlush = () => {
     const onBlockReplyFlushResult = ctx.params.onBlockReplyFlush?.();
     if (isPromiseLike<void>(onBlockReplyFlushResult)) {
@@ -551,6 +559,10 @@ export function handleToolExecutionStart(
         const argsPreview = typeof args === "string" ? args.slice(0, 200) : undefined;
         ctx.log.warn(
           `read tool called without path: toolCallId=${toolCallId} argsType=${typeof args}${argsPreview ? ` argsPreview=${argsPreview}` : ""}`,
+        );
+      } else if (looksLikeDirectoryReadPath(filePath)) {
+        ctx.log.warn(
+          `read tool called with directory-like path: toolCallId=${toolCallId} path=${filePath}`,
         );
       }
     }

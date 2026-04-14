@@ -255,6 +255,33 @@ describe("gateway tool", () => {
     );
   });
 
+  it("surfaces a clear error when config.get is blocked by plugins.allow", async () => {
+    vi.mocked(callGatewayTool).mockImplementationOnce(async (method: string) => {
+      if (method === "config.get") {
+        throw new Error(
+          'The `openclaw config.get` command is unavailable because `plugins.allow` excludes "config.get".',
+        );
+      }
+      return { ok: true };
+    });
+    const tool = requireGatewayTool();
+
+    await expect(
+      tool.execute("call-blocked-config-get", {
+        action: "config.patch",
+        raw: '{ agents: { defaults: { workspace: "~/openclaw" } } }',
+      }),
+    ).rejects.toThrow(
+      'Gateway config writes require config.get access before apply/patch; plugins.allow may exclude "config.get".',
+    );
+    expect(callGatewayTool).toHaveBeenCalledWith("config.get", expect.any(Object), {});
+    expect(callGatewayTool).not.toHaveBeenCalledWith(
+      "config.patch",
+      expect.any(Object),
+      expect.anything(),
+    );
+  });
+
   it("passes update.run through gateway call", async () => {
     const sessionKey = "agent:main:whatsapp:dm:+15555550123";
     const tool = requireGatewayTool(sessionKey);

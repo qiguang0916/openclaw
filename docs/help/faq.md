@@ -1286,10 +1286,17 @@ for usage/billing and raise limits as needed.
   </Accordion>
 
   <Accordion title="How does memory work?">
-    OpenClaw memory is just Markdown files in the agent workspace:
+    OpenClaw memory now depends on the **active memory plugin**.
 
-    - Daily notes in `memory/YYYY-MM-DD.md`
-    - Curated long-term notes in `MEMORY.md` (main/private sessions only)
+    In the active MemPalace path:
+
+    - recall runs through MemPalace-backed `memory_search` / `memory_get`
+    - session capture and dreaming write diary / drawer / KG outputs
+
+    In the legacy file-backed path:
+
+    - daily notes live in `memory/YYYY-MM-DD.md`
+    - curated long-term notes live in `MEMORY.md` (main/private sessions only)
 
     OpenClaw also runs a **silent pre-compaction memory flush** to remind the model
     to write durable notes before auto-compaction. This only runs when the workspace
@@ -1298,8 +1305,12 @@ for usage/billing and raise limits as needed.
   </Accordion>
 
   <Accordion title="Memory keeps forgetting things. How do I make it stick?">
-    Ask the bot to **write the fact to memory**. Long-term notes belong in `MEMORY.md`,
-    short-term context goes into `memory/YYYY-MM-DD.md`.
+    Ask the bot to **write the fact to memory**.
+
+    - In the active MemPalace path, that means writing durable facts into MemPalace
+      and letting `memory_search` / `memory_get` recall them later.
+    - In the legacy file-backed path, long-term notes belong in `MEMORY.md` and
+      short-term context goes into `memory/YYYY-MM-DD.md`.
 
     This is still an area we are improving. It helps to remind the model to store memories;
     it will know what to do. If it keeps forgetting, verify the Gateway is using the same
@@ -1310,10 +1321,14 @@ for usage/billing and raise limits as needed.
   </Accordion>
 
   <Accordion title="Does memory persist forever? What are the limits?">
-    Memory files live on disk and persist until you delete them. The limit is your
-    storage, not the model. The **session context** is still limited by the model
-    context window, so long conversations can compact or truncate. That is why
-    memory search exists - it pulls only the relevant parts back into context.
+    Memory persists until you delete the underlying storage:
+
+    - MemPalace drawers / KG / diary in the active MemPalace path
+    - workspace memory files in the legacy file-backed path
+
+    The **session context** is still limited by the model context window, so long
+    conversations can compact or truncate. That is why memory search exists - it
+    pulls only the relevant parts back into context.
 
     Docs: [Memory](/concepts/memory), [Context](/concepts/context).
 
@@ -1386,7 +1401,7 @@ for usage/billing and raise limits as needed.
     These files live in the **agent workspace**, not `~/.openclaw`.
 
     - **Workspace (per agent)**: `AGENTS.md`, `SOUL.md`, `IDENTITY.md`, `USER.md`,
-      `MEMORY.md` (or legacy fallback `memory.md` when `MEMORY.md` is absent),
+      `MEMORY.md` (or legacy fallback `memory.md` when `MEMORY.md` is absent, for the legacy file-backed lane),
       `memory/YYYY-MM-DD.md`, optional `HEARTBEAT.md`.
     - **State dir (`~/.openclaw`)**: config, channel/provider state, auth profiles, sessions, logs,
       and shared skills (`~/.openclaw/skills`).
@@ -1403,8 +1418,11 @@ for usage/billing and raise limits as needed.
     workspace on every launch (and remember: remote mode uses the **gateway host's**
     workspace, not your local laptop).
 
-    Tip: if you want a durable behavior or preference, ask the bot to **write it into
-    AGENTS.md or MEMORY.md** rather than relying on chat history.
+    Tip: if you want a durable behavior or preference, ask the bot to **persist it into
+    the active memory system** rather than relying on chat history. In the legacy
+    file-backed lane, that usually means `AGENTS.md` or `MEMORY.md`; in the active
+    MemPalace path, it means writing to MemPalace-backed memory and recalling it
+    later with `memory_search` / `memory_get`.
 
     See [Agent workspace](/concepts/agent-workspace) and [Memory](/concepts/memory).
 

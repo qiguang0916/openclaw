@@ -8,6 +8,7 @@ import type { AnyAgentTool } from "../../pi-tools.types.js";
 import { buildEmbeddedAttemptToolRunContext } from "./attempt.tool-run-context.js";
 
 const MEMORY_RELATIVE_PATH = "memory/2026-03-24.md";
+const MEMORY_ALLOWED_TOOLS = ["read", "mempalace_add_drawer"];
 
 function createAttemptParams(workspaceDir: string) {
   return {
@@ -32,6 +33,7 @@ function createAttemptParams(workspaceDir: string) {
     thinkLevel: "off" as const,
     trigger: "memory" as const,
     memoryFlushWritePath: MEMORY_RELATIVE_PATH,
+    memoryFlushAllowedToolNames: MEMORY_ALLOWED_TOOLS,
   };
 }
 
@@ -43,6 +45,7 @@ describe("runEmbeddedAttempt memory flush tool forwarding", () => {
       expect(buildEmbeddedAttemptToolRunContext(createAttemptParams(workspaceDir))).toMatchObject({
         trigger: "memory",
         memoryFlushWritePath: MEMORY_RELATIVE_PATH,
+        memoryFlushAllowedToolNames: MEMORY_ALLOWED_TOOLS,
       });
     } finally {
       await fs.rm(workspaceDir, { recursive: true, force: true });

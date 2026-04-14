@@ -152,15 +152,39 @@ function extractExecListEntries(text: string, heading: string): ParsedExecListEn
     if (line.includes("│")) {
       const cells = line
         .split("│")
-        .map((cell) => cleanExecListCell(cell))
-        .filter(Boolean);
+        .slice(1, -1)
+        .map((cell) => cleanExecListCell(cell));
       if (cells.length < 2) {
         continue;
       }
-      if (cells[0] === "Status" || cells[1] === "Skill" || cells[1] === "Plugin") {
+      if (
+        cells.includes("Status") ||
+        cells.includes("Skill") ||
+        cells.includes("Plugin") ||
+        cells.includes("Name")
+      ) {
         continue;
       }
-      const [status, name] = cells;
+
+      const statusIndex = heading.startsWith("Plugins ") ? 3 : 0;
+      const nameIndex = heading.startsWith("Plugins ") ? 0 : 1;
+      const idIndex = heading.startsWith("Plugins ") ? 1 : -1;
+      const status = cells[statusIndex] ?? "";
+      const rawName = cells[nameIndex] ?? "";
+      const rawId = idIndex >= 0 ? (cells[idIndex] ?? "") : "";
+
+      const name =
+        heading.startsWith("Plugins ") &&
+        rawId &&
+        (rawName.startsWith("@") || rawName.endsWith("/"))
+          ? rawId
+          : rawName;
+
+      // Rich CLI tables wrap long names/descriptions into continuation rows with
+      // an empty status cell. Keep only the primary row for each entry.
+      if (!status || !name) {
+        continue;
+      }
       if (status && name) {
         entries.push({ status, name });
       }

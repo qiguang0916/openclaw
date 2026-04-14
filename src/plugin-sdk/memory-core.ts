@@ -10,6 +10,7 @@ export {
   parseAgentSessionKey,
   parseNonNegativeByteSize,
   readNumberParam,
+  resolveAgentWorkspaceDir,
   readStringParam,
   resolveCronStyleNow,
   resolveDefaultAgentId,

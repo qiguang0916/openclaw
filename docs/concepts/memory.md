@@ -8,13 +8,17 @@ read_when:
 
 # Memory Overview
 
-OpenClaw remembers things by writing **plain Markdown files** in your agent's
-workspace. The model only "remembers" what gets saved to disk -- there is no
-hidden state.
+OpenClaw remembers things through the **active memory plugin**. In this
+deployment, the practical primary path is MemPalace-backed memory via
+`mempalace-memory`, while `memory-core` remains as a legacy file-backed
+compatibility lane.
+
+The model only "remembers" what gets saved to a durable substrate -- there is
+no hidden state.
 
 ## How it works
 
-Your agent has three memory-related files:
+Legacy file-backed memory uses three memory-related files:
 
 - **`MEMORY.md`** -- long-term memory. Durable facts, preferences, and
   decisions. Loaded at the start of every DM session.
@@ -23,7 +27,14 @@ Your agent has three memory-related files:
 - **`DREAMS.md`** (experimental, optional) -- Dream Diary and dreaming sweep
   summaries for human review.
 
-These files live in the agent workspace (default `~/.openclaw/workspace`).
+Those files live in the agent workspace (default `~/.openclaw/workspace`) and
+remain relevant for the legacy `memory-core` lane.
+
+MemPalace-backed memory separates the same ideas into:
+
+- **drawers** for verbatim evidence
+- **knowledge graph** for durable facts and relationships
+- **diary** for agent reflection and continuity
 
 <Tip>
 If you want your agent to remember something, just ask it: "Remember that I
@@ -32,13 +43,15 @@ prefer TypeScript." It will write it to the appropriate file.
 
 ## Memory tools
 
-The agent has two tools for working with memory:
+The agent has two canonical tools for working with memory:
 
 - **`memory_search`** -- finds relevant notes using semantic search, even when
   the wording differs from the original.
 - **`memory_get`** -- reads a specific memory file or line range.
 
-Both tools are provided by the active memory plugin (default: `memory-core`).
+Both tools are provided by the active memory plugin. When
+`mempalace-memory` owns the slot, the same `memory_search` and `memory_get`
+interface runs on top of MemPalace instead of legacy file memory.
 
 ## Memory search
 
@@ -59,13 +72,14 @@ For details on how search works, tuning options, and provider setup, see
 ## Memory backends
 
 <CardGroup cols={3}>
-<Card title="Builtin (default)" icon="database" href="/concepts/memory-builtin">
-SQLite-based. Works out of the box with keyword search, vector similarity, and
-hybrid search. No extra dependencies.
+<Card title="Builtin (legacy default)" icon="database" href="/concepts/memory-builtin">
+SQLite-based compatibility backend for the legacy file-backed `memory-core`
+lane. Works out of the box with keyword search, vector similarity, and hybrid
+search.
 </Card>
-<Card title="QMD" icon="search" href="/concepts/memory-qmd">
-Local-first sidecar with reranking, query expansion, and the ability to index
-directories outside the workspace.
+<Card title="QMD (legacy sidecar)" icon="search" href="/concepts/memory-qmd">
+Optional local-first sidecar for the legacy `memory-core` lane, with reranking,
+query expansion, and the ability to index directories outside the workspace.
 </Card>
 <Card title="Honcho" icon="brain" href="/concepts/memory-honcho">
 AI-native cross-session memory with user modeling, semantic search, and
@@ -76,30 +90,32 @@ multi-agent awareness. Plugin install.
 ## Automatic memory flush
 
 Before [compaction](/concepts/compaction) summarizes your conversation, OpenClaw
-runs a silent turn that reminds the agent to save important context to memory
-files. This is on by default -- you do not need to configure anything.
+runs a silent turn that reminds the agent to save important context to the
+active memory backend. This is on by default.
 
 <Tip>
 The memory flush prevents context loss during compaction. If your agent has
-important facts in the conversation that are not yet written to a file, they
-will be saved automatically before the summary happens.
+important facts in the conversation that are not yet persisted, they will be
+saved automatically before the summary happens.
 </Tip>
 
 ## Dreaming (experimental)
 
-Dreaming is an optional background consolidation pass for memory. It collects
-short-term signals, scores candidates, and promotes only qualified items into
-long-term memory (`MEMORY.md`).
+Dreaming is an optional background consolidation pass for memory.
+
+- In the active MemPalace path, dreaming writes diary + drawer + KG outputs.
+- In the legacy `memory-core` path, dreaming writes file-backed artifacts such
+  as `MEMORY.md` and `DREAMS.md`.
 
 It is designed to keep long-term memory high signal:
 
 - **Opt-in**: disabled by default.
-- **Scheduled**: when enabled, `memory-core` auto-manages one recurring cron job
-  for a full dreaming sweep.
+- **Scheduled**: when enabled, the active memory plugin auto-manages the
+  recurring dreaming sweep.
 - **Thresholded**: promotions must pass score, recall frequency, and query
   diversity gates.
-- **Reviewable**: phase summaries and diary entries are written to `DREAMS.md`
-  for human review.
+- **Reviewable**: both the MemPalace path and the legacy file-backed path keep
+  auditable outputs and event traces.
 
 For phase behavior, scoring signals, and Dream Diary details, see
 [Dreaming (experimental)](/concepts/dreaming).
@@ -114,8 +130,8 @@ openclaw memory index --force   # Rebuild the index
 
 ## Further reading
 
-- [Builtin Memory Engine](/concepts/memory-builtin) -- default SQLite backend
-- [QMD Memory Engine](/concepts/memory-qmd) -- advanced local-first sidecar
+- [Builtin Memory Engine](/concepts/memory-builtin) -- legacy SQLite compatibility backend
+- [QMD Memory Engine](/concepts/memory-qmd) -- optional sidecar for the legacy `memory-core` lane
 - [Honcho Memory](/concepts/memory-honcho) -- AI-native cross-session memory
 - [Memory Search](/concepts/memory-search) -- search pipeline, providers, and
   tuning

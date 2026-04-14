@@ -21,6 +21,7 @@ const EVENT_SCOPE_GUARDS: Record<string, string[]> = {
   "sessions.changed": [READ_SCOPE],
   "session.message": [READ_SCOPE],
   "session.tool": [READ_SCOPE],
+  "chat.progress": [READ_SCOPE],
 };
 
 export type GatewayBroadcastStateVersion = {
@@ -78,7 +79,10 @@ export function createGatewayBroadcaster(params: { clients: Set<GatewayWsClient>
       return;
     }
     const isTargeted = Boolean(targetConnIds);
-    const eventSeq = isTargeted ? undefined : ++seq;
+    // Lossy events intentionally tolerate drops for slow clients. Keep them out
+    // of strict sequence accounting so a missed heartbeat/progress update does
+    // not force an unnecessary reconnect for long-running sessions.
+    const eventSeq = isTargeted || opts?.dropIfSlow ? undefined : ++seq;
     const frame = JSON.stringify({
       type: "event",
       event,

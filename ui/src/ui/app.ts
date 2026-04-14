@@ -166,6 +166,11 @@ export class OpenClawApp extends LitElement {
   @state() chatStream: string | null = null;
   @state() chatStreamStartedAt: number | null = null;
   @state() chatRunId: string | null = null;
+  chatRunStartedAt = 0;
+  @state() chatLastActivityKind: string | null = null;
+  @state() chatProgressTick = 0;
+  chatLastActivityAt = 0;
+  chatStaleRecoveryInFlight = false;
   @state() compactionStatus: CompactionStatus | null = null;
   @state() fallbackStatus: FallbackStatus | null = null;
   @state() chatAvatarUrl: string | null = null;
@@ -406,6 +411,7 @@ export class OpenClawApp extends LitElement {
   @state() cronBusy = false;
 
   @state() updateAvailable: import("./types.js").UpdateAvailable | null = null;
+  chatWatchdogInterval: number | null = null;
 
   // Overview dashboard state
   @state() attentionItems: import("./types.js").AttentionItem[] = [];
@@ -533,6 +539,28 @@ export class OpenClawApp extends LitElement {
   }
 
   protected updated(changed: Map<PropertyKey, unknown>) {
+    if (changed.has("chatRunId")) {
+      if (this.chatRunId) {
+        const now = Date.now();
+        this.chatRunStartedAt = now;
+        this.chatLastActivityAt = now;
+        this.chatLastActivityKind = "请求已发送，等待后台开始处理";
+        this.chatProgressTick = now;
+        this.chatStaleRecoveryInFlight = false;
+      } else {
+        this.chatRunStartedAt = 0;
+        this.chatLastActivityAt = 0;
+        this.chatLastActivityKind = null;
+      }
+    }
+    if (
+      (changed.has("chatStream") && this.chatStream !== null) ||
+      (changed.has("chatToolMessages") && this.chatToolMessages.length > 0) ||
+      (changed.has("chatMessages") && this.chatMessages.length > 0)
+    ) {
+      this.chatLastActivityAt = Date.now();
+      this.chatProgressTick = this.chatLastActivityAt;
+    }
     handleUpdated(this as unknown as Parameters<typeof handleUpdated>[0], changed);
     if (!changed.has("sessionKey") || this.agentsPanel !== "tools") {
       return;

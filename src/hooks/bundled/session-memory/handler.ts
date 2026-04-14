@@ -9,6 +9,10 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
+  saveSessionMemoryToMempalace,
+  shouldUseMempalaceSessionMemory,
+} from "../../../../extensions/mempalace-memory/api.js";
+import {
   resolveAgentIdByWorkspacePath,
   resolveAgentWorkspaceDir,
 } from "../../../agents/agent-scope.js";
@@ -77,8 +81,6 @@ const saveSessionToMemory: HookHandler = async (event) => {
       workspaceDir: contextWorkspaceDir,
       sessionKey: event.sessionKey,
     });
-    const memoryDir = path.join(workspaceDir, "memory");
-    await fs.mkdir(memoryDir, { recursive: true });
 
     // Get today's date for filename
     const now = new Date(event.timestamp);
@@ -167,11 +169,6 @@ const saveSessionToMemory: HookHandler = async (event) => {
 
     // Create filename with date and slug
     const filename = `${dateStr}-${slug}.md`;
-    const memoryFilePath = path.join(memoryDir, filename);
-    log.debug("Memory file path resolved", {
-      filename,
-      path: memoryFilePath.replace(os.homedir(), "~"),
-    });
 
     // Format time as HH:MM:SS UTC
     const timeStr = now.toISOString().split("T")[1].split(".")[0];
@@ -196,6 +193,36 @@ const saveSessionToMemory: HookHandler = async (event) => {
     }
 
     const entry = entryParts.join("\n");
+
+    if (cfg && shouldUseMempalaceSessionMemory(cfg)) {
+      try {
+        const write = await saveSessionMemoryToMempalace({
+          cfg,
+          agentId,
+          entry,
+          timestamp: event.timestamp.getTime(),
+          slug,
+          sessionId,
+        });
+        log.info(
+          `Session context saved to MemPalace (${write.wing} / ${write.room} @ ${write.palacePath})`,
+        );
+        return;
+      } catch (error) {
+        log.warn("MemPalace session-memory write failed; falling back to workspace file memory.", {
+          error: error instanceof Error ? error.message : String(error),
+          agentId,
+        });
+      }
+    }
+
+    const memoryDir = path.join(workspaceDir, "memory");
+    await fs.mkdir(memoryDir, { recursive: true });
+    const memoryFilePath = path.join(memoryDir, filename);
+    log.debug("Memory file path resolved", {
+      filename,
+      path: memoryFilePath.replace(os.homedir(), "~"),
+    });
 
     // Write under memory root with alias-safe file validation.
     await writeFileWithinRoot({

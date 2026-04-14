@@ -203,6 +203,17 @@ function stripReadTruncationContentDetails(
   };
 }
 
+function describeReadToolError(error: unknown, filePath: string): Error {
+  const errno = error as NodeJS.ErrnoException | undefined;
+  if (errno?.code === "ENOENT") {
+    return new Error(`Read failed: file not found: ${filePath}`);
+  }
+  if (errno?.code === "EISDIR") {
+    return new Error(`Read failed: path is a directory, not a file: ${filePath}`);
+  }
+  return error instanceof Error ? error : new Error(String(error));
+}
+
 async function executeReadWithAdaptivePaging(params: {
   base: AnyAgentTool;
   toolCallId: string;
@@ -634,14 +645,19 @@ export function createOpenClawReadTool(
     execute: async (toolCallId, params, signal) => {
       const record = getToolParamsRecord(params);
       assertRequiredParams(record, REQUIRED_PARAM_GROUPS.read, base.name);
-      const result = await executeReadWithAdaptivePaging({
-        base,
-        toolCallId,
-        args: record ?? {},
-        signal,
-        maxBytes: resolveAdaptiveReadMaxBytes(options),
-      });
       const filePath = typeof record?.path === "string" ? String(record.path) : "<unknown>";
+      let result: AgentToolResult<unknown>;
+      try {
+        result = await executeReadWithAdaptivePaging({
+          base,
+          toolCallId,
+          args: record ?? {},
+          signal,
+          maxBytes: resolveAdaptiveReadMaxBytes(options),
+        });
+      } catch (error) {
+        throw describeReadToolError(error, filePath);
+      }
       const strippedDetailsResult = stripReadTruncationContentDetails(result);
       const normalizedResult = await normalizeReadImageResult(strippedDetailsResult, filePath);
       return sanitizeToolResultImages(

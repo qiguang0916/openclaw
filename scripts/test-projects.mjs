@@ -5,6 +5,7 @@ import { resolveVitestCliEntry, resolveVitestNodeArgs } from "./run-vitest.mjs";
 import {
   createVitestRunSpecs,
   parseTestProjectsArgs,
+  registerProcessCleanupHandlers,
   resolveChangedTargetArgs,
   writeVitestIncludeFile,
 } from "./test-projects.test-support.mjs";
@@ -25,6 +26,11 @@ const releaseLockOnce = () => {
   lockReleased = true;
   releaseLock();
 };
+
+const unregisterProcessCleanupHandlers = registerProcessCleanupHandlers({
+  process,
+  release: releaseLockOnce,
+});
 
 function cleanupVitestRunSpec(spec) {
   if (!spec.includeFilePath) {
@@ -81,32 +87,36 @@ function createRootVitestRunSpec(args) {
 }
 
 async function main() {
-  const args = process.argv.slice(2);
-  const { targetArgs } = parseTestProjectsArgs(args, process.cwd());
-  const changedTargetArgs =
-    targetArgs.length === 0 ? resolveChangedTargetArgs(args, process.cwd()) : null;
-  const runSpecs =
-    targetArgs.length === 0 && changedTargetArgs === null
-      ? [createRootVitestRunSpec(args)]
-      : createVitestRunSpecs(args, {
-          baseEnv: process.env,
-          cwd: process.cwd(),
-        });
+  try {
+    const args = process.argv.slice(2);
+    const { targetArgs } = parseTestProjectsArgs(args, process.cwd());
+    const changedTargetArgs =
+      targetArgs.length === 0 ? resolveChangedTargetArgs(args, process.cwd()) : null;
+    const runSpecs =
+      targetArgs.length === 0 && changedTargetArgs === null
+        ? [createRootVitestRunSpec(args)]
+        : createVitestRunSpecs(args, {
+            baseEnv: process.env,
+            cwd: process.cwd(),
+          });
 
-  for (const spec of runSpecs) {
-    const result = await runVitestSpec(spec);
-    if (result.signal) {
-      releaseLockOnce();
-      process.kill(process.pid, result.signal);
-      return;
+    for (const spec of runSpecs) {
+      const result = await runVitestSpec(spec);
+      if (result.signal) {
+        releaseLockOnce();
+        process.kill(process.pid, result.signal);
+        return;
+      }
+      if (result.code !== 0) {
+        releaseLockOnce();
+        process.exit(result.code);
+      }
     }
-    if (result.code !== 0) {
-      releaseLockOnce();
-      process.exit(result.code);
-    }
+
+    releaseLockOnce();
+  } finally {
+    unregisterProcessCleanupHandlers();
   }
-
-  releaseLockOnce();
 }
 
 main().catch((error) => {

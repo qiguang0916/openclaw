@@ -27,7 +27,17 @@ import { authorizeOperatorScopesForMethod } from "./method-scopes.js";
 import { resolveGatewayScopedTools } from "./tool-resolution.js";
 
 const DEFAULT_BODY_BYTES = 2 * 1024 * 1024;
-const MEMORY_TOOL_NAMES = new Set(["memory_search", "memory_get"]);
+const MEMORY_TOOL_NAMES = new Set([
+  "memory_search",
+  "memory_get",
+  "memory_write",
+  "memory_kg_query",
+  "memory_stats",
+  "memory_update",
+  "memory_delete",
+  "memory_export",
+  "memory_import",
+]);
 
 type ToolsInvokeBody = {
   tool?: unknown;
@@ -202,7 +212,7 @@ export async function handleToolsInvokeHttpRequest(
           type: "invalid_request",
           message:
             `memory tools are disabled in tests${suffix}. ` +
-            'Enable by setting plugins.slots.memory="memory-core" (and ensure plugins.enabled is not false).',
+            'Enable by setting plugins.slots.memory to an active memory plugin such as "mempalace-memory" (or "memory-core" for the legacy compatibility lane), and ensure plugins.enabled is not false.',
         },
       });
       return true;

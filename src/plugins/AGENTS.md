@@ -56,7 +56,9 @@ assembly, and contract enforcement.
 ## Verification
 
 - If you touch loader, registry, activation, or public-artifact code that can
-  change bundled plugin import fanout, run `pnpm build`.
+  change bundled plugin import fanout, run `pnpm build:reload` (builds + restarts
+  gateway). Using plain `pnpm build` without restarting the gateway leaves the
+  running process on the old bundle and makes runtime behaviour appear unchanged.
 - If the change can alter bundled plugin startup cost, re-profile the affected
   plugin entrypoint with:
   `OPENCLAW_LOCAL_CHECK=0 node scripts/profile-extension-memory.mjs --extension <id> --skip-combined --concurrency 1`

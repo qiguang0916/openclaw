@@ -32,6 +32,18 @@ function resolveSuggestedRemoteMemoryProvider(): string | undefined {
   )?.providerId;
 }
 
+function resolveActiveMemorySlotId(cfg: OpenClawConfig): string {
+  const raw = typeof cfg.plugins?.slots?.memory === "string" ? cfg.plugins.slots.memory.trim() : "";
+  if (raw && raw.toLowerCase() !== "none") {
+    return raw;
+  }
+  return "memory-core";
+}
+
+function shouldAuditLegacyMemoryRecallArtifacts(cfg: OpenClawConfig): boolean {
+  return resolveActiveMemorySlotId(cfg) === "memory-core";
+}
+
 type RuntimeMemoryAuditContext = {
   workspaceDir?: string;
   backend?: string;
@@ -92,6 +104,9 @@ function buildMemoryRecallIssueNote(audit: ShortTermAuditSummary): string | null
 }
 
 export async function noteMemoryRecallHealth(cfg: OpenClawConfig): Promise<void> {
+  if (!shouldAuditLegacyMemoryRecallArtifacts(cfg)) {
+    return;
+  }
   try {
     const context = await resolveRuntimeMemoryAuditContext(cfg);
     const workspaceDir = context?.workspaceDir?.trim();
@@ -124,6 +139,9 @@ export async function maybeRepairMemoryRecallHealth(params: {
   cfg: OpenClawConfig;
   prompter: DoctorPrompter;
 }): Promise<void> {
+  if (!shouldAuditLegacyMemoryRecallArtifacts(params.cfg)) {
+    return;
+  }
   try {
     const context = await resolveRuntimeMemoryAuditContext(params.cfg);
     const workspaceDir = context?.workspaceDir?.trim();
@@ -192,6 +210,34 @@ export async function noteMemorySearchHealth(
   const agentDir = resolveAgentDir(cfg, agentId);
   const resolved = resolveMemorySearchConfig(cfg, agentId);
   const hasRemoteApiKey = hasConfiguredMemorySecretInput(resolved?.remote?.apiKey);
+  const activeMemorySlot = resolveActiveMemorySlotId(cfg);
+
+  if (activeMemorySlot !== "memory-core") {
+    const result = await getActiveMemorySearchManager({
+      cfg,
+      agentId,
+      purpose: "status",
+    });
+    if (!result.manager) {
+      note(
+        `Active memory plugin "${activeMemorySlot}" is enabled, but the runtime is unavailable${result.error ? `: ${result.error}` : "."}`,
+        "Memory search",
+      );
+      return;
+    }
+    try {
+      const embeddingProbe = await result.manager.probeEmbeddingAvailability();
+      if (!embeddingProbe.ok) {
+        note(
+          `Active memory plugin "${activeMemorySlot}" is configured, but recall is not ready${embeddingProbe.error ? `: ${embeddingProbe.error}` : "."}`,
+          "Memory search",
+        );
+      }
+    } finally {
+      await result.manager.close?.().catch(() => undefined);
+    }
+    return;
+  }
 
   if (!resolved) {
     note("Memory search is explicitly disabled (enabled: false).", "Memory search");

@@ -10,6 +10,14 @@ const replaceConfigFileMock = vi.hoisted(() =>
 const wizardMocks = vi.hoisted(() => ({
   createClackPrompter: vi.fn(),
 }));
+const ensureWorkspaceAndSessionsMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mempalaceInitMocks = vi.hoisted(() => ({
+  shouldUse: vi.fn(() => false),
+  init: vi.fn().mockResolvedValue({
+    privatePalacePath: "/tmp/mempalace/agents/work",
+    privateKnowledgeGraphPath: "/tmp/mempalace/agents/work/knowledge_graph.sqlite3",
+  }),
+}));
 
 vi.mock("../config/config.js", async () => ({
   ...(await vi.importActual<typeof import("../config/config.js")>("../config/config.js")),
@@ -20,6 +28,14 @@ vi.mock("../config/config.js", async () => ({
 
 vi.mock("../wizard/clack-prompter.js", () => ({
   createClackPrompter: wizardMocks.createClackPrompter,
+}));
+vi.mock("./onboard-helpers.js", async () => ({
+  ...(await vi.importActual<typeof import("./onboard-helpers.js")>("./onboard-helpers.js")),
+  ensureWorkspaceAndSessions: ensureWorkspaceAndSessionsMock,
+}));
+vi.mock("../../extensions/mempalace-memory/api.js", () => ({
+  shouldUseMempalaceSessionMemory: mempalaceInitMocks.shouldUse,
+  initializeAgentMempalaceSpace: mempalaceInitMocks.init,
 }));
 
 import { WizardCancelledError } from "../wizard/prompts.js";
@@ -33,6 +49,10 @@ describe("agents add command", () => {
     writeConfigFileMock.mockClear();
     replaceConfigFileMock.mockClear();
     wizardMocks.createClackPrompter.mockClear();
+    ensureWorkspaceAndSessionsMock.mockClear();
+    mempalaceInitMocks.shouldUse.mockReset();
+    mempalaceInitMocks.shouldUse.mockReturnValue(false);
+    mempalaceInitMocks.init.mockClear();
     runtime.log.mockClear();
     runtime.error.mockClear();
     runtime.exit.mockClear();
@@ -74,5 +94,45 @@ describe("agents add command", () => {
 
     expect(runtime.exit).toHaveBeenCalledWith(1);
     expect(writeConfigFileMock).not.toHaveBeenCalled();
+  });
+
+  it("initializes a private MemPalace space when mempalace-memory owns the slot", async () => {
+    readConfigFileSnapshotMock.mockResolvedValue({
+      ...baseConfigSnapshot,
+      config: {
+        plugins: {
+          slots: { memory: "mempalace-memory" },
+          entries: { "mempalace-memory": { enabled: true, config: {} } },
+        },
+        agents: { defaults: {} },
+      },
+      sourceConfig: {
+        plugins: {
+          slots: { memory: "mempalace-memory" },
+          entries: { "mempalace-memory": { enabled: true, config: {} } },
+        },
+        agents: { defaults: {} },
+      },
+    });
+    mempalaceInitMocks.shouldUse.mockReturnValue(true);
+
+    await agentsAddCommand(
+      {
+        name: "Work",
+        workspace: "/tmp/workspace-work",
+        nonInteractive: true,
+      },
+      runtime,
+    );
+
+    expect(mempalaceInitMocks.init).toHaveBeenCalledWith(
+      expect.objectContaining({
+        agentId: "work",
+        displayName: "Work",
+        workspaceDir: "/tmp/workspace-work",
+      }),
+    );
+    expect(replaceConfigFileMock).toHaveBeenCalled();
+    expect(ensureWorkspaceAndSessionsMock).toHaveBeenCalled();
   });
 });

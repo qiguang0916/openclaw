@@ -130,4 +130,30 @@ describe("createOpenClawCodingTools read behavior", () => {
     });
     expect(details?.truncation).not.toHaveProperty("content");
   });
+
+  it("rewrites EISDIR errors into a stable read-tool message", async () => {
+    const baseRead: AgentTool = {
+      name: "read",
+      label: "read",
+      description: "test read",
+      parameters: Type.Object({
+        path: Type.String(),
+        offset: Type.Optional(Type.Number()),
+        limit: Type.Optional(Type.Number()),
+      }),
+      execute: vi.fn(async () => {
+        const error = new Error("read failed: EISDIR") as NodeJS.ErrnoException;
+        error.code = "EISDIR";
+        throw error;
+      }),
+    };
+
+    const wrapped = createOpenClawReadTool(
+      baseRead as unknown as Parameters<typeof createOpenClawReadTool>[0],
+    );
+
+    await expect(wrapped.execute("read-dir-1", { path: "notes/" })).rejects.toThrow(
+      "Read failed: path is a directory, not a file: notes/",
+    );
+  });
 });

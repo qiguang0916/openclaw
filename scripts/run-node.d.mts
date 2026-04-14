@@ -13,6 +13,8 @@ export function resolveBuildRequirement(deps: {
   configFiles: string[];
 }): { shouldBuild: boolean; reason: string };
 
+export function shouldUseSourceReadOnlyFastPath(args: string[]): boolean;
+
 export function runNodeMain(params?: {
   spawn?: (
     cmd: string,

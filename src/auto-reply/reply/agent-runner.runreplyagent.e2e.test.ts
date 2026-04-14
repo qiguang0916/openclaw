@@ -31,6 +31,7 @@ type EmbeddedRunParams = {
   prompt?: string;
   extraSystemPrompt?: string;
   memoryFlushWritePath?: string;
+  memoryFlushAllowedToolNames?: string[];
   sessionId?: string;
   sessionFile?: string;
   silentExpected?: boolean;
@@ -1938,6 +1939,77 @@ describe("runReplyAgent memory flush", () => {
       expect(flushCall?.extraSystemPrompt).toContain("MEMORY.md");
       expect(flushCall?.silentExpected).toBe(true);
       expect(calls[1]?.prompt).toBe("hello");
+    });
+  });
+
+  it("forwards tool-driven memory flush allow-lists from the active memory plugin", async () => {
+    await withTempStore(async (storePath) => {
+      const sessionKey = "main";
+      const sessionEntry = {
+        sessionId: "session",
+        updatedAt: Date.now(),
+        totalTokens: 80_000,
+        compactionCount: 1,
+      };
+
+      await seedSessionStore({ storePath, sessionKey, entry: sessionEntry });
+
+      const memoryState = await import("../../plugins/memory-state.js");
+      const snapshot = {
+        corpusSupplements: memoryState.listMemoryCorpusSupplements(),
+        promptBuilder: memoryState.getMemoryPromptSectionBuilder(),
+        promptSupplements: memoryState.listMemoryPromptSupplements(),
+        flushPlanResolver: memoryState.getMemoryFlushPlanResolver(),
+        runtime: memoryState.getMemoryRuntime(),
+      };
+      memoryState.registerMemoryFlushPlanResolver(() => ({
+        softThresholdTokens: 4_000,
+        forceFlushTranscriptBytes: 2 * 1024 * 1024,
+        reserveTokensFloor: 20_000,
+        prompt: "Use MemPalace tools only.",
+        systemPrompt: "Tool-driven flush.",
+        allowedToolNames: ["read", "memory_search", "mempalace_add_drawer"],
+      }));
+
+      try {
+        const calls: Array<EmbeddedRunParams> = [];
+        state.runEmbeddedPiAgentMock.mockImplementation(async (params: EmbeddedRunParams) => {
+          calls.push(params);
+          if (params.prompt?.includes("Use MemPalace tools only.")) {
+            return { payloads: [], meta: {} };
+          }
+          return {
+            payloads: [{ text: "ok" }],
+            meta: { agentMeta: { usage: { input: 1, output: 1 } } },
+          };
+        });
+
+        const baseRun = createBaseRun({
+          storePath,
+          sessionEntry,
+        });
+
+        await runReplyAgentWithBase({
+          baseRun,
+          storePath,
+          sessionKey,
+          sessionEntry,
+          commandBody: "hello",
+        });
+
+        expect(calls).toHaveLength(2);
+        expect(calls[0]?.prompt).toContain("Use MemPalace tools only.");
+        expect(calls[0]?.memoryFlushWritePath).toBeUndefined();
+        expect(calls[0]?.memoryFlushAllowedToolNames).toEqual([
+          "read",
+          "memory_search",
+          "mempalace_add_drawer",
+        ]);
+        expect(calls[0]?.extraSystemPrompt).toContain("Tool-driven flush.");
+        expect(calls[1]?.prompt).toBe("hello");
+      } finally {
+        memoryState.restoreMemoryPluginState(snapshot);
+      }
     });
   });
 

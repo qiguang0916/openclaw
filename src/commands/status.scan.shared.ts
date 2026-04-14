@@ -181,6 +181,19 @@ export async function resolveSharedMemoryStatusSnapshot(params: {
     return null;
   }
   const agentId = agentStatus.defaultId ?? "main";
+  const nonCoreMemorySlot = memoryPlugin.slot !== "memory-core";
+  if (nonCoreMemorySlot) {
+    const { manager } = await params.getMemorySearchManager({ cfg, agentId, purpose: "status" });
+    if (!manager) {
+      return null;
+    }
+    try {
+      await manager.probeVectorAvailability();
+    } catch {}
+    const status = manager.status();
+    await manager.close?.().catch(() => {});
+    return { agentId, ...status };
+  }
   const defaultStorePath = params.requireDefaultStore?.(agentId);
   if (
     defaultStorePath &&

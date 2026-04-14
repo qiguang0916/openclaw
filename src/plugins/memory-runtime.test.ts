@@ -3,8 +3,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 const resolveRuntimePluginRegistryMock = vi.fn();
 const applyPluginAutoEnableMock = vi.fn();
 const getMemoryRuntimeMock = vi.fn();
-const resolveAgentWorkspaceDirMock = vi.fn();
-const resolveDefaultAgentIdMock = vi.fn(() => "default");
+const resolveAgentWorkspaceDirMock = vi.fn((..._args: unknown[]) => undefined);
+const resolveDefaultAgentIdMock = vi.fn((..._args: unknown[]) => "default");
 
 vi.mock("../config/plugin-auto-enable.js", () => ({
   applyPluginAutoEnable: (...args: unknown[]) => applyPluginAutoEnableMock(...args),

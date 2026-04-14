@@ -17,6 +17,7 @@ import {
   renderStreamingGroup,
 } from "../chat/grouped-render.ts";
 import { InputHistory } from "../chat/input-history.ts";
+import { extractText } from "../chat/message-extract.ts";
 import { normalizeMessage, normalizeRoleForGrouping } from "../chat/message-normalizer.ts";
 import { PinnedMessages } from "../chat/pinned-messages.ts";
 import { getPinnedMessageSummary } from "../chat/pinned-summary.ts";
@@ -30,6 +31,7 @@ import {
   type SlashCommandDef,
 } from "../chat/slash-commands.ts";
 import { isSttSupported, startStt, stopStt } from "../chat/speech.ts";
+import { extractToolCards } from "../chat/tool-cards.ts";
 import { icons } from "../icons.ts";
 import { detectTextDirection } from "../text-direction.ts";
 import type { GatewaySessionRow, SessionsListResult } from "../types.ts";
@@ -43,6 +45,11 @@ export type ChatProps = {
   sessionKey: string;
   onSessionKeyChange: (next: string) => void;
   thinkingLevel: string | null;
+  composerStatus?: {
+    owner: string;
+    model: string;
+    thinking: string;
+  };
   showThinking: boolean;
   showToolCalls: boolean;
   loading: boolean;
@@ -55,6 +62,12 @@ export type ChatProps = {
   streamSegments: Array<{ text: string; ts: number }>;
   stream: string | null;
   streamStartedAt: number | null;
+  waitingStatus?: {
+    lastActivityAt: number;
+    lastActivityKind: string | null;
+    recovering?: boolean;
+    tick?: number;
+  };
   assistantAvatarUrl?: string | null;
   draft: string;
   queue: ChatQueueItem[];
@@ -175,6 +188,94 @@ export const cleanupChatModuleState = resetChatViewState;
 function adjustTextareaHeight(el: HTMLTextAreaElement) {
   el.style.height = "auto";
   el.style.height = `${Math.min(el.scrollHeight, 150)}px`;
+}
+
+function isWriteLikeToolName(name: string): boolean {
+  return /(write|save|create|edit|patch|apply_patch|file)/i.test(name);
+}
+
+function resolveRecentExecBlockLabel(messages: unknown[]): string | null {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const text = extractText(messages[index])?.trim();
+    if (!text) {
+      continue;
+    }
+    const allowlistMatch =
+      /([A-Za-z0-9._/-]+): not in allowlist/i.exec(text) ??
+      /public surface access blocked for "([^"]+)"/i.exec(text);
+    if (allowlistMatch) {
+      const target = allowlistMatch[1];
+      return `实际阻塞：${target} 未通过 allowlist，后台可能正在重复重试`;
+    }
+    const deniedMatch = /Exec denied[^\n]*?(?::\s*(.+))?$/im.exec(text);
+    if (deniedMatch) {
+      const command = deniedMatch[1]?.trim();
+      return command ? `实际阻塞：后台执行被拒绝：${command}` : "实际阻塞：后台执行被拒绝";
+    }
+    const failedExecMatch = /Exec (?:completed|finished)[\s\S]*?(not be completed:[\s\S]+)/i.exec(
+      text,
+    );
+    if (failedExecMatch) {
+      const summary = failedExecMatch[1]
+        .replace(/\s*\|\|\s*/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return `实际阻塞：${summary}`;
+    }
+  }
+  return null;
+}
+
+function resolveWaitingProgressLabel(
+  status:
+    | {
+        lastActivityAt: number;
+        lastActivityKind: string | null;
+        recovering?: boolean;
+        tick?: number;
+      }
+    | undefined,
+): string | null {
+  if (!status || !status.lastActivityAt) {
+    return null;
+  }
+  const now = status.tick && status.tick > 0 ? status.tick : Date.now();
+  const elapsedSeconds = Math.max(0, Math.floor((now - status.lastActivityAt) / 1000));
+  if (status.recovering) {
+    return `进度播报：${status.lastActivityKind ?? "长时间无活动"}，正在自动恢复`;
+  }
+  if (elapsedSeconds <= 5) {
+    return `进度播报：已等待 ${elapsedSeconds} 秒；刚刚有后台活动${status.lastActivityKind ? `，${status.lastActivityKind}` : ""}`;
+  }
+  if (elapsedSeconds <= 20) {
+    return `进度播报：已等待 ${elapsedSeconds} 秒；后台最近仍有活动${status.lastActivityKind ? `，${status.lastActivityKind}` : ""}`;
+  }
+  return `进度播报：已等待 ${elapsedSeconds} 秒；最近没有新活动${status.lastActivityKind ? `；最后活动：${status.lastActivityKind}` : ""}`;
+}
+
+function resolveWaitingActivityLabel(toolMessages: unknown[], messages: unknown[]): string {
+  const recentBlock = resolveRecentExecBlockLabel(messages);
+  if (recentBlock) {
+    return recentBlock;
+  }
+  for (let index = toolMessages.length - 1; index >= 0; index -= 1) {
+    const cards = extractToolCards(toolMessages[index]);
+    for (let cardIndex = cards.length - 1; cardIndex >= 0; cardIndex -= 1) {
+      const card = cards[cardIndex];
+      const name = card.name.trim() || "tool";
+      if (card.kind === "result") {
+        return isWriteLikeToolName(name)
+          ? `实际活动：最近完成了 ${name} 写入`
+          : `实际活动：最近完成了 ${name}`;
+      }
+      if (card.kind === "call") {
+        return isWriteLikeToolName(name)
+          ? `实际活动：正在调用 ${name} 写入`
+          : `实际活动：正在调用 ${name}`;
+      }
+    }
+  }
+  return "实际活动：尚未观察到任何工具或写入动作";
 }
 
 function renderCompactionIndicator(status: CompactionIndicatorStatus | null | undefined) {
@@ -1000,7 +1101,15 @@ export function renderChat(props: ChatProps) {
               `;
             }
             if (item.kind === "reading-indicator") {
-              return renderReadingIndicatorGroup(assistantIdentity, props.basePath);
+              return renderReadingIndicatorGroup(
+                assistantIdentity,
+                props.basePath,
+                resolveWaitingActivityLabel(
+                  Array.isArray(props.toolMessages) ? props.toolMessages : [],
+                  Array.isArray(props.messages) ? props.messages : [],
+                ),
+                resolveWaitingProgressLabel(props.waitingStatus),
+              );
             }
             if (item.kind === "stream") {
               return renderStreamingGroup(
@@ -1262,6 +1371,15 @@ export function renderChat(props: ChatProps) {
         ${vs.sttRecording && vs.sttInterimText
           ? html`<div class="agent-chat__stt-interim">${vs.sttInterimText}</div>`
           : nothing}
+        ${props.composerStatus
+          ? html`
+              <div class="agent-chat__composer-status" aria-label="Current conversation settings">
+                <span>负责人：${props.composerStatus.owner}</span>
+                <span>模型：${props.composerStatus.model}</span>
+                <span>思考：${props.composerStatus.thinking}</span>
+              </div>
+            `
+          : nothing}
 
         <textarea
           ${ref((el) => el && adjustTextareaHeight(el as HTMLTextAreaElement))}
@@ -1468,6 +1586,7 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       },
     });
   }
+  const visibleHistoryItems: ChatItem[] = [];
   for (let i = historyStart; i < history.length; i++) {
     const msg = history[i];
     const normalized = normalizeMessage(msg);
@@ -1495,12 +1614,20 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
       continue;
     }
 
-    items.push({
+    const nextItem: ChatItem = {
       kind: "message",
       key: messageKey(msg, i),
       message: msg,
-    });
+    };
+    if (
+      !props.showToolCalls &&
+      coalesceProgressiveAssistantHistory(visibleHistoryItems, nextItem)
+    ) {
+      continue;
+    }
+    visibleHistoryItems.push(nextItem);
   }
+  items.push(...visibleHistoryItems);
   // Interleave stream segments and tool cards in order. Each segment
   // contains text that was streaming before the corresponding tool started.
   // This ensures correct visual ordering: text → tool → text → tool → ...
@@ -1541,12 +1668,55 @@ function buildChatItems(props: ChatProps): Array<ChatItem | MessageGroup> {
   return groupMessages(items);
 }
 
+function coalesceProgressiveAssistantHistory(
+  historyItems: ChatItem[],
+  nextItem: ChatItem,
+): boolean {
+  if (nextItem.kind !== "message") {
+    return false;
+  }
+  const nextMessage = nextItem.message;
+  if (!isAssistantHistoryMessage(nextMessage)) {
+    return false;
+  }
+  const previousItem = historyItems[historyItems.length - 1];
+  if (!previousItem || previousItem.kind !== "message") {
+    return false;
+  }
+  const previousMessage = previousItem.message;
+  if (!isAssistantHistoryMessage(previousMessage)) {
+    return false;
+  }
+  const previousText = extractText(previousMessage)?.trim();
+  const nextText = extractText(nextMessage)?.trim();
+  if (!previousText || !nextText) {
+    return false;
+  }
+  if (nextText === previousText || nextText.startsWith(previousText)) {
+    historyItems[historyItems.length - 1] = nextItem;
+    return true;
+  }
+  return false;
+}
+
+function isAssistantHistoryMessage(message: unknown): boolean {
+  if (!message || typeof message !== "object") {
+    return false;
+  }
+  const role = (message as { role?: unknown }).role;
+  return typeof role === "string" && role.toLowerCase() === "assistant";
+}
+
 function messageKey(message: unknown, index: number): string {
   const m = message as Record<string, unknown>;
   const toolCallId = typeof m.toolCallId === "string" ? m.toolCallId : "";
   if (toolCallId) {
     return `tool:${toolCallId}`;
   }
+  const marker =
+    m.__openclaw && typeof m.__openclaw === "object" && !Array.isArray(m.__openclaw)
+      ? (m.__openclaw as Record<string, unknown>)
+      : null;
   const id = typeof m.id === "string" ? m.id : "";
   if (id) {
     return `msg:${id}`;
@@ -1554,6 +1724,14 @@ function messageKey(message: unknown, index: number): string {
   const messageId = typeof m.messageId === "string" ? m.messageId : "";
   if (messageId) {
     return `msg:${messageId}`;
+  }
+  const openClawId = marker && typeof marker.id === "string" ? marker.id : "";
+  if (openClawId) {
+    return `msg:${openClawId}`;
+  }
+  const openClawSeq = marker && typeof marker.seq === "number" ? marker.seq : null;
+  if (openClawSeq != null) {
+    return `msg:seq:${openClawSeq}`;
   }
   const timestamp = typeof m.timestamp === "number" ? m.timestamp : null;
   const role = typeof m.role === "string" ? m.role : "unknown";

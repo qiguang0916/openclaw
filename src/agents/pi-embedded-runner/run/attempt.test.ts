@@ -1059,6 +1059,44 @@ describe("wrapStreamFnSanitizeMalformedToolCalls", () => {
     expect(seenContext.messages[0]?.content?.[0]?.name).toBe("read");
   });
 
+  it("drops replayed read tool calls that point at obvious directories", async () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "toolUse", id: "call_1", name: "functions.read", input: { path: "." } }],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call_1",
+        toolName: "read",
+        content: [{ type: "text", text: "stale result" }],
+        isError: false,
+      },
+      {
+        role: "user",
+        content: [{ type: "text", text: "retry" }],
+      },
+    ];
+    const baseFn = vi.fn((_model, _context) =>
+      createFakeStream({ events: [], resultMessage: { role: "assistant", content: [] } }),
+    );
+
+    const wrapped = wrapStreamFnSanitizeMalformedToolCalls(baseFn as never, new Set(["read"]));
+    const stream = wrapped({} as never, { messages } as never, {} as never) as
+      | FakeWrappedStream
+      | Promise<FakeWrappedStream>;
+    await Promise.resolve(stream);
+
+    expect(baseFn).toHaveBeenCalledTimes(1);
+    const seenContext = baseFn.mock.calls[0]?.[1] as { messages: unknown[] };
+    expect(seenContext.messages).toEqual([
+      {
+        role: "user",
+        content: [{ type: "text", text: "retry" }],
+      },
+    ]);
+  });
+
   it("canonicalizes mixed-case allowlisted tool names on replay", async () => {
     const messages = [
       {

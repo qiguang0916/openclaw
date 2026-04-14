@@ -184,6 +184,22 @@ describe("before_tool_call hook integration", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
+  it("blocks read when path looks like a directory before plugin hooks run", async () => {
+    beforeToolCallHook = installBeforeToolCallHook({
+      runBeforeToolCallImpl: async () => undefined,
+    });
+    const execute = vi.fn().mockResolvedValue({ content: [], details: { ok: true } });
+    // oxlint-disable-next-line typescript/no-explicit-any
+    const tool = wrapToolWithBeforeToolCallHook({ name: "read", execute } as any);
+    const extensionContext = {} as Parameters<typeof tool.execute>[3];
+
+    await expect(
+      tool.execute("call-dir", { path: "." }, undefined, extensionContext),
+    ).rejects.toThrow("Read blocked: path looks like a directory, not a file: .");
+    expect(beforeToolCallHook).not.toHaveBeenCalled();
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("normalizes non-object params for hook contract", async () => {
     beforeToolCallHook = installBeforeToolCallHook({
       runBeforeToolCallImpl: async () => undefined,

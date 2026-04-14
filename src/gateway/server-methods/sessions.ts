@@ -995,6 +995,7 @@ export const sessionsHandlers: GatewayRequestHandlers = {
       key,
       reason,
       commandSource: "gateway:sessions.reset",
+      emitLifecycleHooks: p.emitLifecycleHooks,
     });
     if (!result.ok) {
       respond(false, undefined, result.error);

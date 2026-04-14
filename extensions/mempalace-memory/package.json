@@ -1,0 +1,23 @@
+{
+  "name": "@openclaw/mempalace-memory",
+  "version": "2026.4.10",
+  "private": true,
+  "description": "MemPalace-backed memory plugin skeleton for OpenClaw",
+  "type": "module",
+  "devDependencies": {
+    "openclaw": "workspace:*"
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.4.5"
+  },
+  "peerDependenciesMeta": {
+    "openclaw": {
+      "optional": true
+    }
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ]
+  }
+}

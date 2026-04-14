@@ -12,6 +12,10 @@ const MUTATING_TOOL_NAMES = new Set([
   "canvas",
   "nodes",
   "session_status",
+  "memory_write",
+  "memory_update",
+  "memory_delete",
+  "memory_import",
 ]);
 
 const READ_ONLY_ACTIONS = new Set([
@@ -135,6 +139,11 @@ export function isMutatingToolCall(toolName: string, args: unknown): boolean {
       );
     case "session_status":
       return typeof record?.model === "string" && record.model.trim().length > 0;
+    case "memory_write":
+    case "memory_update":
+    case "memory_delete":
+    case "memory_import":
+      return true;
     default: {
       if (normalized === "cron" || normalized === "gateway" || normalized === "canvas") {
         return action == null || !READ_ONLY_ACTIONS.has(action);

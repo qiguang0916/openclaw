@@ -178,6 +178,8 @@ export function analyzeAllowlistByToolType(
   }
   const pluginIds = new Set(groups.byPlugin.keys());
   const pluginTools = new Set(groups.all);
+  const isExternalProviderSafeTool = (name: string): boolean =>
+    /^[a-z0-9][a-z0-9_]*__[a-z0-9][a-z0-9_]*$/.test(name);
   const unknownAllowlist: string[] = [];
   let hasOnlyPluginEntries = true;
   for (const entry of normalized) {
@@ -192,7 +194,7 @@ export function analyzeAllowlistByToolType(
     if (!isPluginEntry) {
       hasOnlyPluginEntries = false;
     }
-    if (!isCoreEntry && !isPluginEntry) {
+    if (!isCoreEntry && !isPluginEntry && !isExternalProviderSafeTool(entry)) {
       unknownAllowlist.push(entry);
     }
   }

@@ -123,6 +123,10 @@ describe("agent event handler", () => {
     return nodeSendToSession.mock.calls.filter(([, event]) => event === "chat");
   }
 
+  function progressBroadcastCalls(broadcast: ReturnType<typeof vi.fn>) {
+    return broadcast.mock.calls.filter(([event]) => event === "chat.progress");
+  }
+
   const FALLBACK_LIFECYCLE_DATA = {
     phase: "fallback",
     selectedProvider: "fireworks",
@@ -382,6 +386,110 @@ describe("agent event handler", () => {
     nowSpy.mockRestore();
   });
 
+  it("emits chat.progress updates for chat-linked lifecycle, assistant, and tool events", () => {
+    const { broadcast, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-progress", {
+      sessionKey: "session-progress",
+      clientRunId: "client-progress",
+    });
+
+    handler({
+      runId: "run-progress",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 1_000,
+      data: { phase: "start" },
+    });
+    handler({
+      runId: "run-progress",
+      seq: 2,
+      stream: "assistant",
+      ts: 1_100,
+      data: { text: "hello" },
+    });
+    handler({
+      runId: "run-progress",
+      seq: 3,
+      stream: "tool",
+      ts: 1_200,
+      data: { phase: "start", name: "write_file", toolCallId: "tool-progress-1" },
+    });
+
+    const calls = progressBroadcastCalls(broadcast);
+    expect(calls).toHaveLength(3);
+    expect(calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "client-progress",
+        sourceRunId: "run-progress",
+        sessionKey: "session-progress",
+        phase: "started",
+        summary: "后台会话已启动",
+      }),
+    );
+    expect(calls[1]?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "client-progress",
+        phase: "streaming",
+        summary: "模型正在流式回复",
+      }),
+    );
+    expect(calls[2]?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "client-progress",
+        phase: "tool",
+        summary: "工具执行中：write_file",
+        activeToolName: "write_file",
+      }),
+    );
+  });
+
+  it("emits periodic chat.progress heartbeats while a chat-linked run stays active", () => {
+    vi.useFakeTimers();
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(1_000);
+    const { broadcast, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-heartbeat", {
+      sessionKey: "session-heartbeat",
+      clientRunId: "client-heartbeat",
+    });
+
+    handler({
+      runId: "run-heartbeat",
+      seq: 1,
+      stream: "lifecycle",
+      ts: 1_000,
+      data: { phase: "start" },
+    });
+
+    vi.setSystemTime(6_100);
+    vi.advanceTimersByTime(5_100);
+
+    const calls = progressBroadcastCalls(broadcast);
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    expect(calls[0]?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "client-heartbeat",
+        phase: "started",
+        summary: "后台会话已启动",
+      }),
+    );
+    expect(calls.at(-1)?.[1]).toEqual(
+      expect.objectContaining({
+        runId: "client-heartbeat",
+        phase: "started",
+        summary: "仍在执行：后台会话已启动",
+      }),
+    );
+
+    emitLifecycleEnd(handler, "run-heartbeat", 2);
+    const countAfterEnd = progressBroadcastCalls(broadcast).length;
+    vi.setSystemTime(12_500);
+    vi.advanceTimersByTime(6_000);
+    expect(progressBroadcastCalls(broadcast)).toHaveLength(countAfterEnd);
+
+    nowSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
   it("flushes merged segmented text before final when latest segment is throttled", () => {
     let now = 10_800;
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
@@ -463,6 +571,56 @@ describe("agent event handler", () => {
       "delta",
       "final",
     ]);
+    expect(sessionChatCalls(nodeSendToSession)).toHaveLength(3);
+    nowSpy.mockRestore();
+  });
+
+  it("collapses repeated leading prefixes from cumulative assistant snapshots", () => {
+    let now = 11_300;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+    const { broadcast, nodeSendToSession, chatRunState, handler } = createHarness();
+    chatRunState.registry.add("run-repeated-prefix", {
+      sessionKey: "session-repeated-prefix",
+      clientRunId: "client-repeated-prefix",
+    });
+
+    const prefix = "我来对当前OpenClaw的整个记忆系统进行全方位测试。先收集系统现状信息。";
+    handler({
+      runId: "run-repeated-prefix",
+      seq: 1,
+      stream: "assistant",
+      ts: Date.now(),
+      data: { text: prefix, delta: prefix },
+    });
+
+    now = 11_500;
+    handler({
+      runId: "run-repeated-prefix",
+      seq: 2,
+      stream: "assistant",
+      ts: Date.now(),
+      data: {
+        text: `${prefix}${prefix}现在进行功能测试：`,
+        delta: "现在进行功能测试：",
+      },
+    });
+
+    emitLifecycleEnd(handler, "run-repeated-prefix", 3);
+
+    const chatCalls = chatBroadcastCalls(broadcast);
+    expect(chatCalls).toHaveLength(3);
+    const secondPayload = chatCalls[1]?.[1] as {
+      state?: string;
+      message?: { content?: Array<{ text?: string }> };
+    };
+    const finalPayload = chatCalls[2]?.[1] as {
+      state?: string;
+      message?: { content?: Array<{ text?: string }> };
+    };
+    expect(secondPayload.state).toBe("delta");
+    expect(secondPayload.message?.content?.[0]?.text).toBe(`${prefix}现在进行功能测试：`);
+    expect(finalPayload.state).toBe("final");
+    expect(finalPayload.message?.content?.[0]?.text).toBe(`${prefix}现在进行功能测试：`);
     expect(sessionChatCalls(nodeSendToSession)).toHaveLength(3);
     nowSpy.mockRestore();
   });
@@ -620,7 +778,8 @@ describe("agent event handler", () => {
       data: { phase: "start", name: "read", toolCallId: "t1" },
     });
 
-    expect(broadcast).not.toHaveBeenCalled();
+    const agentBroadcasts = broadcast.mock.calls.filter(([event]) => event === "agent");
+    expect(agentBroadcasts).toHaveLength(0);
     expect(broadcastToConnIds).toHaveBeenCalledTimes(1);
     resetAgentRunContextForTest();
   });
@@ -970,6 +1129,45 @@ describe("agent event handler", () => {
         contextTokens: 21,
         estimatedCostUsd: 0.12,
         lastThreadId: 42,
+      }),
+      new Set(["conn-session"]),
+      { dropIfSlow: true },
+    );
+  });
+
+  it("includes clientRunId in terminal sessions.changed payloads for chat-linked runs", () => {
+    const { broadcastToConnIds, sessionEventSubscribers, chatRunState, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-linked",
+    });
+
+    sessionEventSubscribers.subscribe("conn-session");
+    chatRunState.registry.add("run-linked", {
+      sessionKey: "session-linked",
+      clientRunId: "client-linked",
+    });
+    registerAgentRunContext("run-linked", {
+      sessionKey: "session-linked",
+    });
+
+    handler({
+      runId: "run-linked",
+      seq: 2,
+      stream: "lifecycle",
+      ts: 1_800,
+      data: {
+        phase: "end",
+        startedAt: 900,
+        endedAt: 1_700,
+      },
+    });
+
+    expect(broadcastToConnIds).toHaveBeenCalledWith(
+      "sessions.changed",
+      expect.objectContaining({
+        sessionKey: "session-linked",
+        phase: "end",
+        runId: "run-linked",
+        clientRunId: "client-linked",
       }),
       new Set(["conn-session"]),
       { dropIfSlow: true },

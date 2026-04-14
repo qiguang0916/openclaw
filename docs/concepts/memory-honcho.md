@@ -10,8 +10,8 @@ read_when:
 
 [Honcho](https://honcho.dev) adds AI-native memory to OpenClaw. It persists
 conversations to a dedicated service and builds user and agent models over time,
-giving your agent cross-session context that goes beyond workspace Markdown
-files.
+giving your agent cross-session context that goes beyond legacy workspace
+Markdown memory files.
 
 ## What it provides
 
@@ -109,14 +109,14 @@ accurate turn boundaries and relevant recall.
 
 ## Honcho vs builtin memory
 
-|                   | Builtin / QMD                | Honcho                              |
-| ----------------- | ---------------------------- | ----------------------------------- |
-| **Storage**       | Workspace Markdown files     | Dedicated service (local or hosted) |
-| **Cross-session** | Via memory files             | Automatic, built-in                 |
-| **User modeling** | Manual (write to MEMORY.md)  | Automatic profiles                  |
-| **Search**        | Vector + keyword (hybrid)    | Semantic over observations          |
-| **Multi-agent**   | Not tracked                  | Parent/child awareness              |
-| **Dependencies**  | None (builtin) or QMD binary | Plugin install                      |
+|                   | Builtin / QMD                                       | Honcho                              |
+| ----------------- | --------------------------------------------------- | ----------------------------------- |
+| **Storage**       | Workspace Markdown files                            | Dedicated service (local or hosted) |
+| **Cross-session** | Via memory files                                    | Automatic, built-in                 |
+| **User modeling** | Manual in the legacy file-backed lane (`MEMORY.md`) | Automatic profiles                  |
+| **Search**        | Vector + keyword (hybrid)                           | Semantic over observations          |
+| **Multi-agent**   | Not tracked                                         | Parent/child awareness              |
+| **Dependencies**  | None (builtin) or QMD binary                        | Plugin install                      |
 
 Honcho and the builtin memory system can work together. When QMD is configured,
 additional tools become available for searching local Markdown files alongside

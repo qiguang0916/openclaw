@@ -55,10 +55,29 @@ function parseDiaryEntries(raw: string): DiaryEntry[] {
 
 export type DreamingProps = {
   active: boolean;
+  backend?: "memory-core" | "mempalace-memory";
   shortTermCount: number;
   totalSignalCount: number;
   phaseSignalCount: number;
   promotedCount: number;
+  lastRunAt?: string | null;
+  lastRunPhases?: string[] | null;
+  lastDrawerVerified?: boolean;
+  lastDrawer?: {
+    wing?: string;
+    room?: string;
+    drawerId?: string;
+    text?: string;
+    sourceFile?: string | null;
+    verified: boolean;
+  };
+  lastKgFacts?: Array<{
+    subject: string;
+    predicate: string;
+    object: string;
+    validFrom?: string | null;
+    sourceFile?: string | null;
+  }> | null;
   dreamingOf: string | null;
   nextCycle: string | null;
   timezone: string | null;
@@ -101,7 +120,7 @@ const DREAM_SWAP_MS = 6_000;
 
 // ── Sub-tab state ─────────────────────────────────────────────────────
 
-type DreamSubTab = "scene" | "diary";
+type DreamSubTab = "scene" | "diary" | "artifacts";
 let _subTab: DreamSubTab = "scene";
 
 export function setDreamSubTab(tab: DreamSubTab): void {
@@ -210,16 +229,101 @@ export function renderDreaming(props: DreamingProps) {
         >
           ${t("dreaming.tabs.diary")}
         </button>
+        <button
+          class="dreams__tab ${_subTab === "artifacts" ? "dreams__tab--active" : ""}"
+          @click=${() => {
+            _subTab = "artifacts";
+            props.onRequestUpdate?.();
+          }}
+        >
+          Artifacts
+        </button>
       </nav>
 
-      ${_subTab === "scene" ? renderScene(props, idle, dreamText) : renderDiarySection(props)}
+      ${_subTab === "scene"
+        ? renderScene(props, idle, dreamText)
+        : _subTab === "diary"
+          ? renderDiarySection(props)
+          : renderArtifactsSection(props)}
     </div>
   `;
 }
 
 // ── Scene renderer ────────────────────────────────────────────────────
 
+function formatStatusTimestamp(value: string | null | undefined): string | null {
+  if (!value) {
+    return null;
+  }
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) {
+    return value;
+  }
+  return new Date(parsed).toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function resolveSceneStats(
+  props: DreamingProps,
+): Array<{ value: number; label: string; color: string }> {
+  if (props.backend === "mempalace-memory") {
+    return [
+      {
+        value: props.shortTermCount,
+        label: "Recent recalls",
+        color: "var(--text-strong)",
+      },
+      {
+        value: props.totalSignalCount,
+        label: "Last run lines",
+        color: "var(--accent)",
+      },
+      {
+        value: props.phaseSignalCount,
+        label: "Verified KG",
+        color: "var(--accent-2)",
+      },
+    ];
+  }
+  return [
+    {
+      value: props.shortTermCount,
+      label: t("dreaming.stats.shortTerm"),
+      color: "var(--text-strong)",
+    },
+    {
+      value: props.totalSignalCount,
+      label: t("dreaming.stats.signals"),
+      color: "var(--accent)",
+    },
+    {
+      value: props.phaseSignalCount,
+      label: t("dreaming.stats.phaseHits"),
+      color: "var(--accent-2)",
+    },
+  ];
+}
+
 function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
+  const stats = resolveSceneStats(props);
+  const statusParts = [
+    props.backend === "mempalace-memory"
+      ? `${props.phaseSignalCount} verified fact${props.phaseSignalCount === 1 ? "" : "s"}`
+      : `${props.promotedCount} ${t("dreaming.status.promotedSuffix")}`,
+    ...(props.lastDrawerVerified !== undefined
+      ? [props.lastDrawerVerified ? "drawer verified" : "drawer pending verify"]
+      : []),
+    ...(props.lastRunAt ? [`last run ${formatStatusTimestamp(props.lastRunAt)}`] : []),
+    ...(props.lastRunPhases && props.lastRunPhases.length > 0
+      ? [`phases ${props.lastRunPhases.join(", ")}`]
+      : []),
+    ...(props.nextCycle ? [t("dreaming.status.nextSweepPrefix") + " " + props.nextCycle] : []),
+    ...(props.timezone ? [props.timezone] : []),
+  ];
   return html`
     <section class="dreams ${idle ? "dreams--idle" : ""}">
       ${STARS.map(
@@ -268,37 +372,20 @@ function renderScene(props: DreamingProps, idle: boolean, dreamText: string) {
         >
         <div class="dreams__status-detail">
           <div class="dreams__status-dot"></div>
-          <span>
-            ${props.promotedCount} ${t("dreaming.status.promotedSuffix")}
-            ${props.nextCycle
-              ? html`· ${t("dreaming.status.nextSweepPrefix")} ${props.nextCycle}`
-              : nothing}
-            ${props.timezone ? html`· ${props.timezone}` : nothing}
-          </span>
+          <span>${statusParts.join(" · ")}</span>
         </div>
       </div>
 
       <div class="dreams__stats">
-        <div class="dreams__stat">
-          <span class="dreams__stat-value" style="color: var(--text-strong);"
-            >${props.shortTermCount}</span
-          >
-          <span class="dreams__stat-label">${t("dreaming.stats.shortTerm")}</span>
-        </div>
-        <div class="dreams__stat-divider"></div>
-        <div class="dreams__stat">
-          <span class="dreams__stat-value" style="color: var(--accent);"
-            >${props.totalSignalCount}</span
-          >
-          <span class="dreams__stat-label">${t("dreaming.stats.signals")}</span>
-        </div>
-        <div class="dreams__stat-divider"></div>
-        <div class="dreams__stat">
-          <span class="dreams__stat-value" style="color: var(--accent-2);"
-            >${props.phaseSignalCount}</span
-          >
-          <span class="dreams__stat-label">${t("dreaming.stats.phaseHits")}</span>
-        </div>
+        ${stats.map(
+          (stat, index) => html`
+            <div class="dreams__stat">
+              <span class="dreams__stat-value" style="color: ${stat.color};">${stat.value}</span>
+              <span class="dreams__stat-label">${stat.label}</span>
+            </div>
+            ${index < stats.length - 1 ? html`<div class="dreams__stat-divider"></div>` : nothing}
+          `,
+        )}
       </div>
 
       ${props.statusError
@@ -422,6 +509,116 @@ function renderDiarySection(props: DreamingProps) {
                   ${para}
                 </p>`,
             )}
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderArtifactsSection(props: DreamingProps) {
+  if (props.backend !== "mempalace-memory") {
+    return html`
+      <section class="dreams-diary">
+        <div class="dreams-diary__empty">
+          <div class="dreams-diary__empty-text">Legacy dreaming artifacts are limited</div>
+          <div class="dreams-diary__empty-hint">
+            Switch the active memory slot to MemPalace to inspect drawer and KG outputs here.
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  if (!props.lastRunAt) {
+    return html`
+      <section class="dreams-diary">
+        <div class="dreams-diary__empty">
+          <div class="dreams-diary__empty-text">No MemPalace dream artifacts yet</div>
+          <div class="dreams-diary__empty-hint">
+            Run one dreaming pass to surface the latest drawer and KG verification results.
+          </div>
+        </div>
+      </section>
+    `;
+  }
+
+  const dateLabel = formatStatusTimestamp(props.lastRunAt) ?? props.lastRunAt;
+  const phases = props.lastRunPhases?.join(", ") ?? "none";
+  const facts = props.lastKgFacts ?? [];
+  return html`
+    <section class="dreams-diary">
+      <div class="dreams-diary__header">
+        <span class="dreams-diary__title">MemPalace Artifacts</span>
+        <button
+          class="btn btn--subtle btn--sm"
+          ?disabled=${props.modeSaving || props.statusLoading}
+          @click=${() => props.onRefresh()}
+        >
+          ${props.statusLoading ? "Refreshing..." : "Refresh"}
+        </button>
+      </div>
+
+      <article class="dreams-diary__entry" key="artifacts">
+        <div class="dreams-diary__accent"></div>
+        <time class="dreams-diary__date">${dateLabel}</time>
+        <div class="dreams-diary__prose">
+          <p class="dreams-diary__para">
+            Latest MemPalace dreaming run processed ${props.totalSignalCount}
+            line${props.totalSignalCount === 1 ? "" : "s"} across ${phases}.
+          </p>
+          <p class="dreams-diary__para">
+            Recent recall queries considered: ${props.shortTermCount}. KG facts generated:
+            ${props.promotedCount}. Verified KG facts: ${props.phaseSignalCount}.
+          </p>
+          <p class="dreams-diary__para">
+            Drawer verification:
+            ${props.lastDrawerVerified ? "verified and readable" : "pending or unavailable"}.
+          </p>
+          ${props.lastDrawer
+            ? html`
+                <p class="dreams-diary__para">
+                  Latest drawer: ${props.lastDrawer.wing ?? "unknown wing"} /
+                  ${props.lastDrawer.room ?? "unknown room"}${props.lastDrawer.drawerId
+                    ? ` (${props.lastDrawer.drawerId})`
+                    : ""}.
+                </p>
+                ${props.lastDrawer.text
+                  ? html`
+                      <p class="dreams-diary__para">Drawer preview: ${props.lastDrawer.text}</p>
+                    `
+                  : nothing}
+                ${props.lastDrawer.sourceFile
+                  ? html`
+                      <p class="dreams-diary__para">
+                        Drawer source: ${props.lastDrawer.sourceFile}
+                      </p>
+                    `
+                  : nothing}
+              `
+            : nothing}
+          ${facts.length > 0
+            ? html`
+                <p class="dreams-diary__para">Latest KG facts:</p>
+                ${facts.map(
+                  (fact) => html`
+                    <p class="dreams-diary__para">
+                      ${fact.subject} -> ${fact.predicate} ->
+                      ${fact.object}${fact.validFrom ? ` (${fact.validFrom})` : ""}${fact.sourceFile
+                        ? ` [${fact.sourceFile}]`
+                        : ""}.
+                    </p>
+                  `,
+                )}
+              `
+            : nothing}
+          ${props.nextCycle
+            ? html`
+                <p class="dreams-diary__para">
+                  Next scheduled dreaming cycle:
+                  ${props.nextCycle}${props.timezone ? ` (${props.timezone})` : ""}.
+                </p>
+              `
+            : nothing}
         </div>
       </article>
     </section>

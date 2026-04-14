@@ -1,6 +1,8 @@
-import { describe, expect, it } from "vitest";
+import { EventEmitter } from "node:events";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildVitestRunPlans,
+  registerProcessCleanupHandlers,
   resolveChangedTargetArgs,
 } from "../../scripts/test-projects.test-support.mjs";
 
@@ -66,5 +68,33 @@ describe("scripts/test-projects changed-target routing", () => {
         watchMode: false,
       },
     ]);
+  });
+
+  it("releases the heavy-check lock and exits on SIGINT", () => {
+    const proc = new EventEmitter();
+    const release = vi.fn();
+    const exit = vi.fn();
+    proc.exit = exit;
+
+    const unregister = registerProcessCleanupHandlers({ process: proc, release, exit });
+    proc.emit("SIGINT");
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(exit).toHaveBeenCalledWith(130);
+    unregister();
+  });
+
+  it("releases the heavy-check lock on normal process exit", () => {
+    const proc = new EventEmitter();
+    const release = vi.fn();
+    const exit = vi.fn();
+    proc.exit = exit;
+
+    const unregister = registerProcessCleanupHandlers({ process: proc, release, exit });
+    proc.emit("exit");
+
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(exit).not.toHaveBeenCalled();
+    unregister();
   });
 });

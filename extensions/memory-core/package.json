@@ -2,7 +2,7 @@
   "name": "@openclaw/memory-core",
   "version": "2026.4.5",
   "private": true,
-  "description": "OpenClaw core memory search plugin",
+  "description": "Legacy file-backed OpenClaw memory compatibility plugin",
   "type": "module",
   "devDependencies": {
     "openclaw": "workspace:*"
