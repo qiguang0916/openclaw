@@ -43,10 +43,27 @@ export type MemoryHostDreamCompletedEvent = {
   contentHash?: string;
 };
 
+export type MemoryHostAutoExtractEvent = {
+  type: "memory.auto_extract.written";
+  timestamp: string;
+  agentId: string;
+  sessionId?: string;
+  written: number;
+  duplicates: number;
+  skipped: number;
+  entries: Array<{
+    category: string;
+    scope: "private" | "shared";
+    summary: string;
+    storage: "drawer" | "diary" | "kg";
+  }>;
+};
+
 export type MemoryHostEvent =
   | MemoryHostRecallRecordedEvent
   | MemoryHostPromotionAppliedEvent
-  | MemoryHostDreamCompletedEvent;
+  | MemoryHostDreamCompletedEvent
+  | MemoryHostAutoExtractEvent;
 
 export function resolveMemoryHostEventLogPath(workspaceDir: string): string {
   return path.join(workspaceDir, MEMORY_HOST_EVENT_LOG_RELATIVE_PATH);

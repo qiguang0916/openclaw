@@ -1,4 +1,5 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import { registerMempalaceAutoExtract } from "./src/auto-extract.js";
 import { registerMempalaceMemoryCli } from "./src/cli.js";
 import { registerMempalaceDreamingCommand } from "./src/dreaming-command.js";
 import { registerMempalaceDreaming } from "./src/dreaming.js";
@@ -50,6 +51,7 @@ export default definePluginEntry({
     );
     registerMempalaceDreamingCommand(api);
     registerMempalaceDreaming(api);
+    registerMempalaceAutoExtract(api);
     api.registerMemoryPromptSection(buildPromptSection);
     api.registerMemoryFlushPlan(buildMempalaceMemoryFlushPlan);
     api.registerMemoryRuntime(mempalaceMemoryRuntime);

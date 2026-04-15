@@ -14,6 +14,7 @@ import {
   readDrawerBySyntheticPath,
   readKnowledgeGraphFact,
   searchDrawerMemories,
+  searchFts,
   searchKnowledgeGraph,
 } from "./bridge.js";
 import { resolveMempalacePluginConfig } from "./config.js";
@@ -73,6 +74,18 @@ function scoreHit(hit: SearchHit, minScore: number): boolean {
   return Number.isFinite(hit.score) && hit.score >= minScore;
 }
 
+function isBooleanOrPhraseQuery(query: string): boolean {
+  // Quoted phrase: "exact phrase"
+  if (/".+"/.test(query)) {
+    return true;
+  }
+  // Explicit boolean operators (uppercase)
+  if (/\b(?:AND|OR|NOT)\b/.test(query)) {
+    return true;
+  }
+  return false;
+}
+
 function dedupeHits(hits: SearchHit[]): SearchHit[] {
   const bestByPath = new Map<string, SearchHit>();
   for (const hit of hits) {
@@ -88,6 +101,35 @@ function defaultMinScore(): number {
   return 0.15;
 }
 
+function extractImportanceFromFrontmatter(text: string): number | undefined {
+  if (!text.startsWith("---\n")) {
+    return undefined;
+  }
+  const endIndex = text.indexOf("\n---\n");
+  if (endIndex < 0) {
+    return undefined;
+  }
+  const frontmatter = text.slice(4, endIndex);
+  for (const line of frontmatter.split("\n")) {
+    const m = /^importance:\s*(\d+(?:\.\d+)?)/.exec(line.trim());
+    if (m) {
+      const val = Number(m[1]);
+      return Number.isFinite(val) ? val : undefined;
+    }
+  }
+  return undefined;
+}
+
+function applyImportanceBoost(hit: SearchHit): SearchHit {
+  const importance = extractImportanceFromFrontmatter(hit.text);
+  if (importance === undefined) {
+    return hit;
+  }
+  // importance is 1-10; adds up to 0.3 bonus to vector score
+  const boost = (Math.min(10, Math.max(0, importance)) / 10) * 0.3;
+  return { ...hit, score: hit.score + boost };
+}
+
 async function resolveDrawerHits(params: {
   cfg: OpenClawConfig;
   agentId: string;
@@ -95,11 +137,46 @@ async function resolveDrawerHits(params: {
   maxResults: number;
   scope: "private" | "shared";
   palacePath?: string;
+  wing?: string;
+  room?: string;
+  afterTs?: number;
+  beforeTs?: number;
 }): Promise<SearchHit[]> {
   if (!params.palacePath) {
     return [];
   }
   const palacePath = params.palacePath;
+
+  // Boolean/phrase queries route to FTS5 for keyword-accurate matching.
+  if (isBooleanOrPhraseQuery(params.query)) {
+    const ftsHits = await searchFts({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      palacePath,
+      query: params.query,
+      maxResults: Math.max(1, params.maxResults),
+      wing: params.wing,
+      room: params.room,
+    });
+    return ftsHits.map((result) => {
+      const text = result.text ?? "";
+      return {
+        kind: "drawer",
+        path: buildSyntheticPath({
+          scope: params.scope,
+          kind: "drawer",
+          wing: result.wing,
+          room: result.room,
+          text,
+        }),
+        text,
+        score: typeof result.similarity === "number" ? result.similarity : 0,
+        source: "memory",
+      } satisfies SearchHit;
+    });
+  }
+
+  // Vector (semantic) search path with optional time-range filter.
   const variants = buildSearchQueryVariants(params.query);
   const batches = await Promise.all(
     variants.map(
@@ -110,6 +187,10 @@ async function resolveDrawerHits(params: {
           palacePath,
           query,
           maxResults: Math.max(1, params.maxResults * 2),
+          wing: params.wing,
+          room: params.room,
+          afterTs: params.afterTs,
+          beforeTs: params.beforeTs,
         }),
     ),
   );
@@ -230,7 +311,15 @@ export class MempalaceMemoryManager implements MemorySearchManager {
 
   async search(
     query: string,
-    opts?: { maxResults?: number; minScore?: number; sessionKey?: string },
+    opts?: {
+      maxResults?: number;
+      minScore?: number;
+      sessionKey?: string;
+      category?: string;
+      room?: string;
+      afterTs?: number;
+      beforeTs?: number;
+    },
   ): Promise<MemorySearchResult[]> {
     void opts?.sessionKey;
     const cleaned = query.trim();
@@ -240,6 +329,10 @@ export class MempalaceMemoryManager implements MemorySearchManager {
     const resolved = this.resolved();
     const maxResults = Math.max(1, opts?.maxResults ?? 6);
     const minScore = opts?.minScore ?? defaultMinScore();
+    const wing = opts?.category;
+    const room = opts?.room;
+    const afterTs = opts?.afterTs;
+    const beforeTs = opts?.beforeTs;
 
     const [privateDrawerHits, sharedDrawerHits] = await Promise.all([
       resolveDrawerHits({
@@ -249,6 +342,10 @@ export class MempalaceMemoryManager implements MemorySearchManager {
         maxResults,
         scope: "private",
         palacePath: resolved.privatePalacePath,
+        wing,
+        room,
+        afterTs,
+        beforeTs,
       }),
       resolved.readShared &&
       resolved.sharedPalacePath &&
@@ -260,6 +357,10 @@ export class MempalaceMemoryManager implements MemorySearchManager {
             maxResults,
             scope: "shared",
             palacePath: resolved.sharedPalacePath,
+            wing,
+            room,
+            afterTs,
+            beforeTs,
           })
         : Promise.resolve([]),
     ]);
@@ -281,8 +382,8 @@ export class MempalaceMemoryManager implements MemorySearchManager {
         : [];
 
     const merged = dedupeHits([
-      ...privateDrawerHits,
-      ...sharedDrawerHits,
+      ...privateDrawerHits.map(applyImportanceBoost),
+      ...sharedDrawerHits.map(applyImportanceBoost),
       ...kgPrivateHits,
       ...kgSharedHits,
     ])

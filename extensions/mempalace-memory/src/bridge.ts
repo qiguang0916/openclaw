@@ -337,23 +337,62 @@ async function runMempalacePythonJson(params: {
 
 const DRAWER_SEARCH_SCRIPT = `
 import json, sys
-from mempalace.searcher import search_memories
 payload = json.loads(sys.stdin.read())
+palace_path = payload["palace_path"]
+query = payload["query"]
+max_results = int(payload.get("max_results", 5))
+wing = payload.get("wing")
+room = payload.get("room")
+after_ts = payload.get("after_ts")
+before_ts = payload.get("before_ts")
+has_time_filter = after_ts is not None or before_ts is not None
+if not has_time_filter:
+    from mempalace.searcher import search_memories
+    try:
+        result = search_memories(query, palace_path=palace_path, wing=wing, room=room, n_results=max_results)
+    except Exception as exc:
+        if "Collection [mempalace_drawers] does not exist" in str(exc):
+            print(json.dumps({"results": []}))
+            sys.exit(0)
+        raise
+    print(json.dumps(result))
+    sys.exit(0)
+import chromadb
+conditions = []
+if wing:
+    conditions.append({"wing": {"$eq": wing}})
+if room:
+    conditions.append({"room": {"$eq": room}})
+if after_ts is not None:
+    conditions.append({"filed_at_ts": {"$gte": int(after_ts)}})
+if before_ts is not None:
+    conditions.append({"filed_at_ts": {"$lte": int(before_ts)}})
+where = {"$and": conditions} if len(conditions) > 1 else (conditions[0] if conditions else None)
 try:
-    result = search_memories(
-        payload["query"],
-        palace_path=payload["palace_path"],
-        wing=payload.get("wing"),
-        room=payload.get("room"),
-        n_results=payload.get("max_results", 5),
-    )
+    from mempalace.config import get_embedding_function
+    ef = get_embedding_function()
+except Exception:
+    ef = None
+client = chromadb.PersistentClient(path=palace_path)
+try:
+    col = client.get_collection("mempalace_drawers", **({"embedding_function": ef} if ef else {}))
 except Exception as exc:
     if "Collection [mempalace_drawers] does not exist" in str(exc):
         print(json.dumps({"results": []}))
-    else:
-        raise
-else:
-    print(json.dumps(result))
+        sys.exit(0)
+    raise
+qkw = {"query_texts": [query], "n_results": max_results, "include": ["documents", "metadatas", "distances"]}
+if where is not None:
+    qkw["where"] = where
+raw = col.query(**qkw)
+docs = (raw.get("documents") or [[]])[0]
+metas = (raw.get("metadatas") or [[]])[0]
+dists = (raw.get("distances") or [[]])[0]
+results = []
+for doc, meta, dist in zip(docs, metas, dists):
+    m = meta or {}
+    results.append({"text": doc or "", "wing": m.get("wing", ""), "room": m.get("room", ""), "similarity": round(max(0.0, 1.0 - float(dist)), 6), "source_file": m.get("source_file")})
+print(json.dumps({"results": results}))
 `.trim();
 
 const PALACE_STATUS_SCRIPT = `
@@ -616,7 +655,8 @@ try:
         documents=[content],
         metadatas=[{"wing": wing, "room": room, "source_file": source_file,
                     "chunk_index": 0, "added_by": added_by,
-                    "filed_at": datetime.now().isoformat()}]
+                    "filed_at": datetime.now().isoformat(),
+                    "filed_at_ts": int(datetime.now().timestamp())}]
     )
     print(json.dumps({"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}))
 except Exception as e:
@@ -683,6 +723,7 @@ try:
             "chunk_index": 0,
             "added_by": added_by,
             "filed_at": datetime.now().isoformat(),
+            "filed_at_ts": int(datetime.now().timestamp()),
         }]
     )
     print(json.dumps({"success": True, "drawer_id": drawer_id, "wing": wing, "room": room}))
@@ -728,6 +769,10 @@ export async function searchDrawerMemories(params: {
   palacePath: string;
   query: string;
   maxResults: number;
+  wing?: string;
+  room?: string;
+  afterTs?: number;
+  beforeTs?: number;
 }): Promise<MempalaceDrawerHit[]> {
   const result = (await runMempalacePythonJson({
     cfg: params.cfg,
@@ -738,6 +783,10 @@ export async function searchDrawerMemories(params: {
       query: params.query,
       palace_path: params.palacePath,
       max_results: params.maxResults,
+      ...(params.wing ? { wing: params.wing } : {}),
+      ...(params.room ? { room: params.room } : {}),
+      ...(params.afterTs !== undefined ? { after_ts: params.afterTs } : {}),
+      ...(params.beforeTs !== undefined ? { before_ts: params.beforeTs } : {}),
     },
   })) as { results?: MempalaceDrawerHit[]; error?: string };
   if (result.error) {
@@ -1346,4 +1395,133 @@ export function parseSyntheticPath(relPath: string): ParsedSyntheticPath | null 
 
 export function defaultKnowledgeGraphPath(): string {
   return path.join(os.homedir(), ".mempalace", "knowledge_graph.sqlite3");
+}
+
+// ---------------------------------------------------------------------------
+// FTS5 (SQLite full-text search) helpers
+// ---------------------------------------------------------------------------
+
+const DRAWER_FTS_WRITE_SCRIPT = `
+import json, sys, sqlite3, os
+payload = json.loads(sys.stdin.read())
+palace_path = payload["palace_path"]
+drawer_id = payload["drawer_id"]
+wing = payload.get("wing", "")
+room = payload.get("room", "")
+source_file = payload.get("source_file", "")
+content = payload["content"]
+fts_path = os.path.join(palace_path, "fts5.db")
+conn = sqlite3.connect(fts_path)
+try:
+    conn.execute("CREATE TABLE IF NOT EXISTS fts_meta(drawer_id TEXT PRIMARY KEY, wing TEXT, room TEXT, source_file TEXT, rowid_ref INTEGER)")
+    conn.execute("CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(text)")
+    old = conn.execute("SELECT rowid_ref FROM fts_meta WHERE drawer_id=?", (drawer_id,)).fetchone()
+    if old:
+        conn.execute("DELETE FROM fts WHERE rowid=?", (old[0],))
+    conn.execute("INSERT INTO fts(text) VALUES(?)", (content,))
+    rid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute("INSERT OR REPLACE INTO fts_meta VALUES(?,?,?,?,?)", (drawer_id, wing, room, source_file, rid))
+    conn.commit()
+    print(json.dumps({"success": True}))
+except Exception as exc:
+    print(json.dumps({"success": False, "error": str(exc)}))
+finally:
+    conn.close()
+`.trim();
+
+const DRAWER_FTS_SEARCH_SCRIPT = `
+import json, sys, sqlite3, os
+payload = json.loads(sys.stdin.read())
+palace_path = payload["palace_path"]
+query = payload["query"]
+max_results = int(payload.get("max_results", 5))
+wing_filter = payload.get("wing")
+room_filter = payload.get("room")
+fts_path = os.path.join(palace_path, "fts5.db")
+if not os.path.exists(fts_path):
+    print(json.dumps({"results": []}))
+    sys.exit(0)
+conn = sqlite3.connect(fts_path)
+try:
+    sql_params = [query]
+    where_parts = ["f MATCH ?"]
+    if wing_filter:
+        where_parts.append("m.wing = ?")
+        sql_params.append(wing_filter)
+    if room_filter:
+        where_parts.append("m.room = ?")
+        sql_params.append(room_filter)
+    sql_params.append(max_results)
+    sql = "SELECT m.wing, m.room, m.source_file, f.text, f.rank FROM fts f JOIN fts_meta m ON m.rowid_ref = f.rowid WHERE " + " AND ".join(where_parts) + " ORDER BY f.rank LIMIT ?"
+    rows = conn.execute(sql, sql_params).fetchall()
+    results = []
+    if rows:
+        ranks = [r[4] for r in rows]
+        min_r = min(ranks)
+        max_r = max(ranks)
+        for wing, room, src, text, rank in rows:
+            if min_r == max_r:
+                sim = 0.8
+            else:
+                sim = round(0.5 + 0.5 * (rank - max_r) / (min_r - max_r), 4)
+            results.append({"text": text or "", "wing": wing or "", "room": room or "", "similarity": sim, "source_file": src})
+    print(json.dumps({"results": results}))
+except Exception as exc:
+    if "no such table" in str(exc).lower() or "unable to open" in str(exc).lower():
+        print(json.dumps({"results": []}))
+    else:
+        raise
+finally:
+    conn.close()
+`.trim();
+
+export async function writeFtsEntry(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  palacePath: string;
+  drawerId: string;
+  wing: string;
+  room: string;
+  content: string;
+  sourceFile?: string;
+}): Promise<void> {
+  await runMempalacePythonJson({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    palacePath: params.palacePath,
+    script: DRAWER_FTS_WRITE_SCRIPT,
+    payload: {
+      palace_path: params.palacePath,
+      drawer_id: params.drawerId,
+      wing: params.wing,
+      room: params.room,
+      content: params.content,
+      source_file: params.sourceFile ?? "",
+    },
+  });
+}
+
+export async function searchFts(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  palacePath: string;
+  query: string;
+  maxResults: number;
+  wing?: string;
+  room?: string;
+}): Promise<MempalaceDrawerHit[]> {
+  const result = (await runMempalacePythonJson({
+    cfg: params.cfg,
+    agentId: params.agentId,
+    palacePath: params.palacePath,
+    script: DRAWER_FTS_SEARCH_SCRIPT,
+    payload: {
+      palace_path: params.palacePath,
+      query: params.query,
+      max_results: params.maxResults,
+      ...(params.wing ? { wing: params.wing } : {}),
+      ...(params.room ? { room: params.room } : {}),
+    },
+  })) as { results?: MempalaceDrawerHit[]; error?: string };
+  return result.results ?? [];
 }

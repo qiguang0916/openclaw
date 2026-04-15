@@ -22,7 +22,9 @@ import {
   parseSyntheticPath,
   readDrawerById,
   readKnowledgeGraphFact,
+  searchDrawerMemories,
   updateDrawerBySyntheticPath,
+  writeFtsEntry,
   writeDrawerDirect,
   type ParsedSyntheticPath,
 } from "./bridge.js";
@@ -32,8 +34,20 @@ import { queueRecallEvent } from "./recall-events.js";
 
 const MemorySearchSchema = Type.Object({
   query: Type.String(),
+  after: Type.Optional(
+    Type.String({
+      description: "ISO 8601 date — only return memories filed after this date (e.g. 2026-01-01)",
+    }),
+  ),
+  before: Type.Optional(
+    Type.String({
+      description: "ISO 8601 date — only return memories filed before this date (e.g. 2026-12-31)",
+    }),
+  ),
   maxResults: Type.Optional(Type.Number()),
   minScore: Type.Optional(Type.Number()),
+  category: Type.Optional(Type.String()),
+  room: Type.Optional(Type.String()),
 });
 
 const MemoryGetSchema = Type.Object({
@@ -62,6 +76,11 @@ const MemoryWriteSchema = Type.Object(
     source: Type.Optional(Type.String()),
     importance: Type.Optional(Type.Number()),
     tags: Type.Optional(Type.Array(Type.String())),
+    force: Type.Optional(
+      Type.Boolean({
+        description: "Set true to bypass the duplicate-similarity check and write unconditionally.",
+      }),
+    ),
   },
   { additionalProperties: true },
 );
@@ -1079,6 +1098,15 @@ export function createMemorySearchTool(options: {
       const query = readStringParam(params, "query", { required: true });
       const maxResults = readNumberParam(params, "maxResults");
       const minScore = readNumberParam(params, "minScore");
+      const category = readOptionalString(params, "category");
+      const room = readOptionalString(params, "room");
+      const afterStr = readOptionalString(params, "after");
+      const beforeStr = readOptionalString(params, "before");
+      const afterMs = afterStr ? new Date(afterStr).getTime() : undefined;
+      const beforeMs = beforeStr ? new Date(beforeStr).getTime() : undefined;
+      const afterTs = afterMs && Number.isFinite(afterMs) ? Math.floor(afterMs / 1000) : undefined;
+      const beforeTs =
+        beforeMs && Number.isFinite(beforeMs) ? Math.floor(beforeMs / 1000) : undefined;
       const agentId = resolveSessionAgentId({
         sessionKey: options.agentSessionKey,
         config: cfg,
@@ -1103,6 +1131,10 @@ export function createMemorySearchTool(options: {
           maxResults: maxResults ?? undefined,
           minScore: minScore ?? undefined,
           sessionKey: options.agentSessionKey,
+          category: category ?? undefined,
+          room: room ?? undefined,
+          afterTs,
+          beforeTs,
         });
         queueRecallEvent({
           cfg,
@@ -1226,6 +1258,7 @@ export function createMemoryWriteTool(options: {
           }),
         );
       }
+      const force = readBooleanParam(params, "force") ?? false;
       const metadata = extractMemoryWriteMetadata(params);
       const wing = normalizeSafeName(
         metadata.category ?? resolved.defaultWing ?? "OpenClaw Notes",
@@ -1237,6 +1270,38 @@ export function createMemoryWriteTool(options: {
       );
       const storedContent = buildStoredMemoryContent(content, metadata);
       const sourceFile = metadata.source ?? "memory-write://manual";
+
+      // Duplicate-similarity guard: abort if a near-identical memory exists.
+      if (!force) {
+        try {
+          const dupHits = await searchDrawerMemories({
+            cfg,
+            agentId,
+            palacePath: resolved.privatePalacePath,
+            query: content.slice(0, 300),
+            maxResults: 1,
+          });
+          const top = dupHits[0];
+          if (top && typeof top.similarity === "number" && top.similarity >= 0.92) {
+            const existingPath = buildSyntheticPath({
+              scope: "private",
+              kind: "drawer",
+              wing: top.wing,
+              room: top.room,
+              text: top.text,
+            });
+            return jsonResult({
+              success: false,
+              duplicate: true,
+              similarity: top.similarity,
+              existing_path: existingPath,
+              hint: `A very similar memory already exists (similarity ${top.similarity.toFixed(3)}). Use force=true to write anyway, or memory_update to modify the existing entry.`,
+            });
+          }
+        } catch {
+          // Similarity check is best-effort; a search failure must not block the write.
+        }
+      }
       try {
         // In compat (single-palace) mode the daemon's fixed PALACE_PATH matches
         // privatePalacePath, so MCP write reaches the correct location.
@@ -1273,6 +1338,21 @@ export function createMemoryWriteTool(options: {
           });
         }
         const drawerId = typeof result.drawer_id === "string" ? result.drawer_id : undefined;
+
+        // Update FTS5 index (non-fatal: a failure must not block the write response).
+        if (drawerId) {
+          void writeFtsEntry({
+            cfg,
+            agentId,
+            palacePath: resolved.privatePalacePath,
+            drawerId,
+            wing,
+            room,
+            content: storedContent,
+            sourceFile,
+          }).catch(() => {});
+        }
+
         let canonicalRecord: Awaited<ReturnType<typeof readDrawerById>> | null = null;
         let verificationFailed = false;
         if (drawerId) {
