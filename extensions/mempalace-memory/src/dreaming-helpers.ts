@@ -289,7 +289,10 @@ export function resolveDreamingRunTarget(params: {
 export type AutoExtractPromotionCandidate = {
   category: string;
   summary: string;
+  /** Number of distinct agent_end events in the lookback window that included this entry. */
   hits: number;
+  /** Number of distinct agentIds that contributed at least one hit. */
+  agentCount: number;
 };
 
 const AUTO_EXTRACT_PROMOTABLE_CATEGORIES = new Set([
@@ -306,6 +309,13 @@ const AUTO_EXTRACT_PREDICATE_BY_CATEGORY: Record<string, string> = {
   explicit_remember: "remembers",
 };
 
+type PromotionAccumulator = {
+  category: string;
+  summary: string;
+  hits: number;
+  agentIds: Set<string>;
+};
+
 export function collectAutoExtractPromotionCandidates(params: {
   events: MemoryHostEvent[];
   nowMs: number;
@@ -313,7 +323,7 @@ export function collectAutoExtractPromotionCandidates(params: {
   minHits: number;
 }): AutoExtractPromotionCandidate[] {
   const cutoffMs = params.nowMs - params.lookbackDays * 24 * 60 * 60 * 1000;
-  const counts = new Map<string, AutoExtractPromotionCandidate>();
+  const accumulators = new Map<string, PromotionAccumulator>();
   for (const event of params.events) {
     if (event.type !== "memory.auto_extract.written") {
       continue;
@@ -322,6 +332,7 @@ export function collectAutoExtractPromotionCandidates(params: {
     if (!Number.isFinite(eventMs) || eventMs < cutoffMs) {
       continue;
     }
+    const eventAgentId = event.agentId?.trim() ?? "";
     for (const entry of event.entries) {
       if (entry.scope !== "shared" || entry.storage === "kg") {
         continue;
@@ -334,12 +345,27 @@ export function collectAutoExtractPromotionCandidates(params: {
         continue;
       }
       const key = `${entry.category}\n${summary}`;
-      const current = counts.get(key) ?? { category: entry.category, summary, hits: 0 };
-      counts.set(key, { ...current, hits: current.hits + 1 });
+      const current = accumulators.get(key) ?? {
+        category: entry.category,
+        summary,
+        hits: 0,
+        agentIds: new Set<string>(),
+      };
+      current.hits += 1;
+      if (eventAgentId) {
+        current.agentIds.add(eventAgentId);
+      }
+      accumulators.set(key, current);
     }
   }
-  return [...counts.values()]
+  return [...accumulators.values()]
     .filter((c) => c.hits >= params.minHits)
+    .map((c) => ({
+      category: c.category,
+      summary: c.summary,
+      hits: c.hits,
+      agentCount: c.agentIds.size,
+    }))
     .toSorted((a, b) => {
       if (a.hits !== b.hits) {
         return b.hits - a.hits;
@@ -351,7 +377,10 @@ export function collectAutoExtractPromotionCandidates(params: {
 export function buildAutoExtractPromotionKgFacts(params: {
   nowMs: number;
   candidates: AutoExtractPromotionCandidate[];
+  /** Identity label for the KG subject. Defaults to "User". */
+  userIdentity?: string;
 }): Array<{ subject: string; predicate: string; object: string; validFrom: string }> {
+  const subject = params.userIdentity?.trim() || "User";
   const validFrom = new Date(params.nowMs).toISOString().slice(0, 10);
   const facts: Array<{ subject: string; predicate: string; object: string; validFrom: string }> =
     [];
@@ -361,7 +390,7 @@ export function buildAutoExtractPromotionKgFacts(params: {
       continue;
     }
     facts.push({
-      subject: "User",
+      subject,
       predicate,
       object: candidate.summary.slice(0, 200),
       validFrom,

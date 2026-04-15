@@ -18,6 +18,7 @@ describe("resolveMempalaceAutoExtractConfig", () => {
       minConfidence: 0,
       allowKgWrite: false,
       kgWriteMinConfidence: 95,
+      userIdentity: "User",
     });
   });
 
@@ -75,6 +76,27 @@ describe("resolveMempalaceAutoExtractConfig", () => {
 
     expect(off.allowKgWrite).toBe(false);
     expect(on.allowKgWrite).toBe(true);
+  });
+
+  it("reads explicit userIdentity from config", () => {
+    const resolved = resolveMempalaceAutoExtractConfig({
+      plugins: {
+        entries: {
+          "mempalace-memory": { config: { autoExtract: { userIdentity: "Alice" } } },
+        },
+      },
+    } as never);
+    expect(resolved.userIdentity).toBe("Alice");
+  });
+
+  it("defaults userIdentity to 'User' when missing or blank", () => {
+    expect(resolveMempalaceAutoExtractConfig({} as never).userIdentity).toBe("User");
+    const blank = resolveMempalaceAutoExtractConfig({
+      plugins: {
+        entries: { "mempalace-memory": { config: { autoExtract: { userIdentity: "   " } } } },
+      },
+    } as never);
+    expect(blank.userIdentity).toBe("User");
   });
 
   it("treats mode=off as disabled and clamps numeric values", () => {

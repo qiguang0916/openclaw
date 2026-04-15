@@ -540,6 +540,7 @@ async function persistCandidate(params: {
       candidate: params.candidate,
       scope,
       palacePath,
+      userIdentity: params.autoExtract.userIdentity,
     }).catch((kgError: unknown) => {
       params.api.logger.warn(
         `mempalace-memory: auto-extract KG write failed: ${kgError instanceof Error ? kgError.message : String(kgError)}`,
@@ -556,6 +557,7 @@ async function tryWriteToKg(params: {
   candidate: AutoMemoryCandidate;
   scope: AutoMemoryScope;
   palacePath: string;
+  userIdentity: string;
 }): Promise<void> {
   const predicateByCategory: Record<Exclude<AutoMemoryCategory, "project_continuity">, string> = {
     explicit_remember: "remembers",
@@ -577,7 +579,7 @@ async function tryWriteToKg(params: {
     toolName: "mempalace_kg_add",
     palacePath: params.palacePath,
     arguments: {
-      subject: "User",
+      subject: params.userIdentity,
       predicate,
       object: params.candidate.summary.slice(0, 200),
       source_file: `auto-memory://${params.scope}/${params.candidate.category}/${dateStamp}`,
@@ -776,15 +778,20 @@ function emitAutoExtractEvent(params: {
 }
 
 export function registerMempalaceAutoExtract(api: OpenClawPluginApi): void {
-  let turnCount = 0;
-  let lastWrittenTurn = -Infinity;
+  // Per-session state so cooldown does not bleed across unrelated sessions.
+  const sessionTurnCounts = new Map<string, number>();
+  const sessionLastWrittenTurns = new Map<string, number>();
 
   api.on("agent_end", async (event, ctx) => {
     if (!shouldUseMempalaceSessionMemory(api.config)) {
       return;
     }
-    turnCount += 1;
+    const sessionKey = ctx.sessionId?.trim() || ctx.agentId?.trim() || "default";
+    const turnCount = (sessionTurnCounts.get(sessionKey) ?? 0) + 1;
+    sessionTurnCounts.set(sessionKey, turnCount);
+
     const autoExtract = resolveMempalaceAutoExtractConfig(api.config);
+    const lastWrittenTurn = sessionLastWrittenTurns.get(sessionKey) ?? -Infinity;
     if (autoExtract.cooldownTurns > 0 && turnCount - lastWrittenTurn < autoExtract.cooldownTurns) {
       return;
     }
@@ -794,7 +801,7 @@ export function registerMempalaceAutoExtract(api: OpenClawPluginApi): void {
       const duplicates = results.filter((result) => result.status === "duplicate");
       const skipped = results.filter((result) => result.status === "skipped");
       if (written.length > 0) {
-        lastWrittenTurn = turnCount;
+        sessionLastWrittenTurns.set(sessionKey, turnCount);
         api.logger.info(
           `mempalace-memory: auto-extracted ${written.length} durable memory entr${written.length === 1 ? "y" : "ies"}${duplicates.length > 0 ? `, ${duplicates.length} suppressed as duplicate` : ""}.`,
         );

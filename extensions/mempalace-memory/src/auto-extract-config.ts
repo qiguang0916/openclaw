@@ -11,7 +11,7 @@ export type ResolvedMempalaceAutoExtractConfig = {
   dedupeSimilarity: number;
   writeSharedUserMemory: boolean;
   writePrivateContinuity: boolean;
-  /** Minimum turns between any auto-extract writes. 0 = no cooldown. */
+  /** Minimum turns between any auto-extract writes for the same session. 0 = no cooldown. */
   cooldownTurns: number;
   /** Minimum candidate priority to write. 0 = no minimum. */
   minConfidence: number;
@@ -19,6 +19,11 @@ export type ResolvedMempalaceAutoExtractConfig = {
   allowKgWrite: boolean;
   /** Minimum candidate priority required for KG write (only when allowKgWrite is true). */
   kgWriteMinConfidence: number;
+  /**
+   * Identity label used as KG subject and shared-palace room qualifier for extracted user facts.
+   * Defaults to "User". Set per-deployment when the palace is shared across multiple user identities.
+   */
+  userIdentity: string;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -38,6 +43,14 @@ function clampInteger(value: unknown, fallback: number, min: number, max: number
     return fallback;
   }
   return Math.min(max, Math.max(min, Math.floor(value)));
+}
+
+function normalizeIdentityString(value: unknown): string {
+  if (typeof value !== "string") {
+    return "User";
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : "User";
 }
 
 function clampNumber(value: unknown, fallback: number, min: number, max: number): number {
@@ -71,5 +84,6 @@ export function resolveMempalaceAutoExtractConfig(
     minConfidence: clampInteger(raw.minConfidence, 0, 0, 100),
     allowKgWrite: raw.allowKgWrite === true,
     kgWriteMinConfidence: clampInteger(raw.kgWriteMinConfidence, 95, 50, 100),
+    userIdentity: normalizeIdentityString(raw.userIdentity),
   };
 }

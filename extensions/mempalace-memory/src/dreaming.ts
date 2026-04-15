@@ -14,6 +14,7 @@ import {
   shouldUseMempalaceSessionMemory,
   ensureKgFactInMempalace,
 } from "../api.js";
+import { resolveMempalaceAutoExtractConfig } from "./auto-extract-config.js";
 import { readDrawerById, readKnowledgeGraphFact } from "./bridge.js";
 import { resolveMempalacePluginConfig } from "./config.js";
 import {
@@ -474,9 +475,11 @@ async function writeAutoExtractPromotionFacts(params: {
   if (!resolved.enabled || !resolved.server) {
     return 0;
   }
+  const { userIdentity } = resolveMempalaceAutoExtractConfig(params.cfg);
   const kgFacts = buildAutoExtractPromotionKgFacts({
     nowMs: params.nowMs,
     candidates: params.candidates,
+    userIdentity,
   });
   let written = 0;
   const dateStamp = new Date(params.nowMs).toISOString().slice(0, 10);

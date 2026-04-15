@@ -390,7 +390,14 @@ describe("collectAutoExtractPromotionCandidates", () => {
         lookbackDays: 7,
         minHits: 2,
       }),
-    ).toEqual([{ category: "standing_preference", summary: "prefer concise replies", hits: 2 }]);
+    ).toEqual([
+      {
+        category: "standing_preference",
+        summary: "prefer concise replies",
+        hits: 2,
+        agentCount: 1,
+      },
+    ]);
   });
 
   it("excludes private-scope entries", () => {
@@ -562,7 +569,12 @@ describe("buildAutoExtractPromotionKgFacts", () => {
       __testing.buildAutoExtractPromotionKgFacts({
         nowMs: NOW,
         candidates: [
-          { category: "standing_preference", summary: "prefer concise replies", hits: 3 },
+          {
+            category: "standing_preference",
+            summary: "prefer concise replies",
+            hits: 3,
+            agentCount: 1,
+          },
         ],
       }),
     ).toEqual([
@@ -579,7 +591,9 @@ describe("buildAutoExtractPromotionKgFacts", () => {
     expect(
       __testing.buildAutoExtractPromotionKgFacts({
         nowMs: NOW,
-        candidates: [{ category: "standing_constraint", summary: "no emojis", hits: 2 }],
+        candidates: [
+          { category: "standing_constraint", summary: "no emojis", hits: 2, agentCount: 1 },
+        ],
       })[0].predicate,
     ).toBe("avoids");
   });
@@ -588,7 +602,9 @@ describe("buildAutoExtractPromotionKgFacts", () => {
     expect(
       __testing.buildAutoExtractPromotionKgFacts({
         nowMs: NOW,
-        candidates: [{ category: "long_term_goal", summary: "launch in 2026", hits: 2 }],
+        candidates: [
+          { category: "long_term_goal", summary: "launch in 2026", hits: 2, agentCount: 1 },
+        ],
       })[0].predicate,
     ).toBe("has goal");
   });
@@ -597,7 +613,9 @@ describe("buildAutoExtractPromotionKgFacts", () => {
     expect(
       __testing.buildAutoExtractPromotionKgFacts({
         nowMs: NOW,
-        candidates: [{ category: "explicit_remember", summary: "birthday April 15", hits: 2 }],
+        candidates: [
+          { category: "explicit_remember", summary: "birthday April 15", hits: 2, agentCount: 1 },
+        ],
       })[0].predicate,
     ).toBe("remembers");
   });
@@ -606,7 +624,9 @@ describe("buildAutoExtractPromotionKgFacts", () => {
     expect(
       __testing.buildAutoExtractPromotionKgFacts({
         nowMs: NOW,
-        candidates: [{ category: "unknown_category", summary: "something", hits: 3 }],
+        candidates: [
+          { category: "unknown_category", summary: "something", hits: 3, agentCount: 1 },
+        ],
       }),
     ).toEqual([]);
   });
@@ -614,19 +634,30 @@ describe("buildAutoExtractPromotionKgFacts", () => {
   it("truncates summary to 200 chars", () => {
     const facts = __testing.buildAutoExtractPromotionKgFacts({
       nowMs: NOW,
-      candidates: [{ category: "standing_preference", summary: "a".repeat(250), hits: 2 }],
+      candidates: [
+        { category: "standing_preference", summary: "a".repeat(250), hits: 2, agentCount: 1 },
+      ],
     });
     expect(facts[0].object.length).toBe(200);
   });
 
-  it("uses 'User' as subject for all facts", () => {
+  it("uses 'User' as subject by default", () => {
     const facts = __testing.buildAutoExtractPromotionKgFacts({
       nowMs: NOW,
       candidates: [
-        { category: "standing_preference", summary: "pref A", hits: 2 },
-        { category: "long_term_goal", summary: "goal B", hits: 3 },
+        { category: "standing_preference", summary: "pref A", hits: 2, agentCount: 1 },
+        { category: "long_term_goal", summary: "goal B", hits: 3, agentCount: 1 },
       ],
     });
     expect(facts.every((f) => f.subject === "User")).toBe(true);
+  });
+
+  it("uses explicit userIdentity as subject when provided", () => {
+    const facts = __testing.buildAutoExtractPromotionKgFacts({
+      nowMs: NOW,
+      userIdentity: "Alice",
+      candidates: [{ category: "standing_preference", summary: "pref A", hits: 2, agentCount: 1 }],
+    });
+    expect(facts[0].subject).toBe("Alice");
   });
 });
