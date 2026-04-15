@@ -40,7 +40,7 @@ type AutoMemoryCandidate = {
   sourceText: string;
 };
 
-type AutoMemoryStorage = "drawer" | "diary" | "kg";
+type AutoMemoryStorage = "drawer" | "diary" | "kg" | "both";
 
 type AutoMemoryWriteResult =
   | {
@@ -364,6 +364,7 @@ function resolveWingAndRoom(params: {
   agentId: string;
   resolved: ReturnType<typeof resolveMempalacePluginConfig>;
   scope: AutoMemoryScope;
+  userIdentity: string;
 }): { wing: string; room: string } {
   if (params.scope === "private") {
     return {
@@ -380,11 +381,13 @@ function resolveWingAndRoom(params: {
     standing_constraint: "Jarvis User Constraints",
     long_term_goal: "Jarvis User Goals",
   };
+  // Use userIdentity as room name so multi-identity palaces stay segregated.
+  const room = normalizeMempalaceSafeName(params.userIdentity, "User Profile");
   return {
     wing: wingByCategory[
       params.candidate.category as Exclude<AutoMemoryCategory, "project_continuity">
     ],
-    room: "User Profile",
+    room,
   };
 }
 
@@ -437,6 +440,7 @@ async function persistCandidate(params: {
     agentId: params.agentId,
     resolved,
     scope,
+    userIdentity: params.autoExtract.userIdentity,
   });
 
   try {
@@ -520,20 +524,21 @@ async function persistCandidate(params: {
       );
     });
   }
+  const willWriteKg =
+    params.autoExtract.allowKgWrite &&
+    params.candidate.priority >= params.autoExtract.kgWriteMinConfidence;
   const writtenResult = {
     status: "written" as const,
     category: params.candidate.category,
     scope,
     summary: params.candidate.summary,
-    storage: "drawer" as AutoMemoryStorage,
+    // "both" signals that a KG write was also attempted; dreaming promotion must skip these.
+    storage: (willWriteKg ? "both" : "drawer") as AutoMemoryStorage,
   };
 
   // Secondary KG write for high-confidence facts (fire-and-forget, non-blocking).
   // project_continuity is handled earlier via diary, so only drawer-routed categories reach here.
-  if (
-    params.autoExtract.allowKgWrite &&
-    params.candidate.priority >= params.autoExtract.kgWriteMinConfidence
-  ) {
+  if (willWriteKg) {
     void tryWriteToKg({
       api: params.api,
       agentId: params.agentId,
@@ -777,6 +782,9 @@ function emitAutoExtractEvent(params: {
     });
 }
 
+/** Cap session maps to avoid unbounded growth in long-running gateways. */
+const SESSION_MAP_MAX_SIZE = 500;
+
 export function registerMempalaceAutoExtract(api: OpenClawPluginApi): void {
   // Per-session state so cooldown does not bleed across unrelated sessions.
   const sessionTurnCounts = new Map<string, number>();
@@ -787,6 +795,11 @@ export function registerMempalaceAutoExtract(api: OpenClawPluginApi): void {
       return;
     }
     const sessionKey = ctx.sessionId?.trim() || ctx.agentId?.trim() || "default";
+    // Evict all entries when the maps grow too large to prevent unbounded accumulation.
+    if (sessionTurnCounts.size >= SESSION_MAP_MAX_SIZE) {
+      sessionTurnCounts.clear();
+      sessionLastWrittenTurns.clear();
+    }
     const turnCount = (sessionTurnCounts.get(sessionKey) ?? 0) + 1;
     sessionTurnCounts.set(sessionKey, turnCount);
 

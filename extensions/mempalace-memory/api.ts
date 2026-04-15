@@ -706,9 +706,11 @@ export function ensureKgFactInMempalace(params: {
   object: string;
   validFrom?: string;
   sourceFile?: string;
-}): void {
+  /** Override which KG database to write to. Defaults to the agent's private KG path. */
+  dbPath?: string;
+}): boolean {
   const resolved = resolveMempalacePluginConfig(params.cfg, params.agentId);
-  const dbPath = resolved.privateKnowledgeGraphPath;
+  const dbPath = params.dbPath ?? resolved.privateKnowledgeGraphPath;
   const subject = normalizeMempalaceSafeName(params.subject, "OpenClaw Agent");
   const predicate = normalizeMempalaceSafeName(params.predicate, "relates to")
     .toLowerCase()
@@ -749,16 +751,19 @@ export function ensureKgFactInMempalace(params: {
     db.prepare("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)").run(subjectId, subject);
     db.prepare("INSERT OR IGNORE INTO entities (id, name) VALUES (?, ?)").run(objectId, object);
     const tripleId = `t_${subjectId}_${predicate}_${objectId}_${Date.now().toString(36)}`;
-    db.prepare(
-      "INSERT OR IGNORE INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_file) VALUES (?, ?, ?, ?, ?, NULL, 1.0, ?)",
-    ).run(
-      tripleId,
-      subjectId,
-      predicate,
-      objectId,
-      params.validFrom ?? null,
-      params.sourceFile ?? "dreaming://kg",
-    );
+    const insertResult = db
+      .prepare(
+        "INSERT OR IGNORE INTO triples (id, subject, predicate, object, valid_from, valid_to, confidence, source_file) VALUES (?, ?, ?, ?, ?, NULL, 1.0, ?)",
+      )
+      .run(
+        tripleId,
+        subjectId,
+        predicate,
+        objectId,
+        params.validFrom ?? null,
+        params.sourceFile ?? "dreaming://kg",
+      );
+    return insertResult.changes > 0;
   } finally {
     db.close();
   }

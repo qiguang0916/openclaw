@@ -483,9 +483,11 @@ async function writeAutoExtractPromotionFacts(params: {
   });
   let written = 0;
   const dateStamp = new Date(params.nowMs).toISOString().slice(0, 10);
+  // Shared-scope auto-extract candidates promote to the shared KG, not the agent's private KG.
+  const kgDbPath = resolved.sharedKnowledgeGraphPath ?? resolved.privateKnowledgeGraphPath;
   for (const fact of kgFacts) {
     try {
-      ensureKgFactInMempalace({
+      const inserted = ensureKgFactInMempalace({
         cfg: params.cfg,
         agentId: params.agentId,
         subject: fact.subject,
@@ -493,8 +495,11 @@ async function writeAutoExtractPromotionFacts(params: {
         object: fact.object,
         validFrom: fact.validFrom,
         sourceFile: `auto-extract-promotion://${dateStamp}`,
+        dbPath: kgDbPath,
       });
-      written += 1;
+      if (inserted) {
+        written += 1;
+      }
     } catch (err) {
       params.logger.warn(
         `mempalace-memory: auto-extract promotion KG write failed: ${err instanceof Error ? err.message : String(err)}`,

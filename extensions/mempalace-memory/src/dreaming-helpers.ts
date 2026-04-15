@@ -334,7 +334,7 @@ export function collectAutoExtractPromotionCandidates(params: {
     }
     const eventAgentId = event.agentId?.trim() ?? "";
     for (const entry of event.entries) {
-      if (entry.scope !== "shared" || entry.storage === "kg") {
+      if (entry.scope !== "shared" || entry.storage === "kg" || entry.storage === "both") {
         continue;
       }
       if (!AUTO_EXTRACT_PROMOTABLE_CATEGORIES.has(entry.category)) {
