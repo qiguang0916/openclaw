@@ -55,7 +55,7 @@ export type MemoryHostAutoExtractEvent = {
     category: string;
     scope: "private" | "shared";
     summary: string;
-    storage: "drawer" | "diary" | "kg" | "both";
+    storage: "drawer" | "diary" | "kg";
   }>;
 };
 
