@@ -1,7 +1,7 @@
 ---
 title: review-notes: MemPalace automatic memory extraction MVP
 type: review-notes
-status: active
+status: implemented
 date: 2026-04-14
 ---
 
@@ -232,15 +232,18 @@ Main challenge a reviewer should raise:
 
 ## Simplifications Made Intentionally
 
-- No extra LLM extraction call.
-- No KG writes.
-- No diary writes.
-- No new memory-host event type yet.
-- No cross-turn synthesis beyond the current-turn user message slice.
-- No migration or backfill of previous transcripts.
+- No extra LLM extraction call. _(still true — rule-based only)_
+- No cross-turn synthesis beyond the current-turn user message slice. _(still true)_
+- No migration or backfill of previous transcripts. _(still true)_
 
-These simplifications were intentional to keep the first implementation small,
-testable, and easy to disable or revise.
+The following items listed as simplifications in the initial draft have since
+been implemented:
+
+- ~~No KG writes.~~ Direct KG writes are now supported via `autoExtract.allowKgWrite`
+  (disabled by default). Dreaming promotion also writes KG facts for high-frequency entries.
+- ~~No diary writes.~~ `project_continuity` candidates are written to diary, with drawer fallback.
+- ~~No new memory-host event type yet.~~ `memory.auto_extract.written` event type added.
+- ~~No shared/private routing.~~ Shared user facts route to the shared palace; continuity notes route private.
 
 ## Tradeoffs
 
@@ -292,12 +295,24 @@ direct script that imported the plugin and asserted:
    what is the lightest multilingual improvement that does not require an extra
    LLM pass?
 
-## Recommended Next Steps
+## Implementation Status (as of 2026-04-15)
 
-1. Gather real examples of user utterances that should and should not be
-   captured, then tune the detectors.
-2. Add explicit observability for auto-extract writes and suppressions.
-3. Consider a second-phase optional LLM-assisted extractor behind
-   `mode: "balanced"` or a separate config gate.
-4. Add drawer-to-KG promotion rules only after enough evidence exists from real
-   usage.
+All four phases described in the plan have been delivered:
+
+- **Phase 1** (`a7d55e5056`): conservative drawer-first MVP with `agent_end` hook,
+  eligibility gate, deduplication, shared/private routing, FTS write, diary for continuity.
+- **Phase 2**: shared/private routing was included in Phase 1.
+- **Phase 3**: direct KG writes available via `autoExtract.allowKgWrite` (off by default).
+- **Phase 4** (`e515adf4d1`): dreaming integration — `collectAutoExtractPromotionCandidates`
+  promotes high-frequency shared entries to KG during the dreaming cron pass.
+
+## Remaining Open Questions
+
+1. Are the current persistence markers too English/Chinese specific? Lightest multilingual
+   improvement without an extra LLM pass is to expand PERSISTENCE_RE and category regexes.
+2. Should shared user-memory fallback-to-private add explicit provenance tags to ease
+   later migration?
+3. Is drawer-only the right MVP default, or is there a narrow class of KG-safe facts worth
+   promoting at `minConfidence: 95` even in conservative mode out of the box?
+4. Should `balanced` mode include an optional LLM-assisted extraction sub-pass for cases
+   where rule coverage is too low?

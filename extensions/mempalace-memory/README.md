@@ -23,6 +23,15 @@ Current state:
 - tool-driven pre-compaction memory flush routed through MemPalace tools
 - session-memory hook writes to MemPalace first, then falls back to workspace files only if needed
 - MemPalace-native dreaming writes diary + drawer + KG outputs and exposes `openclaw memory dream status|run`
+- automatic `agent_end` memory extraction: rule-based extractor captures user preferences, constraints,
+  goals, explicit remember instructions, and project continuity notes without explicit tool calls
+- auto-extract shared/private routing: user-level facts route to the shared palace; agent continuity
+  notes route to the private palace
+- auto-extract deduplication, cooldown, and FTS write for each extracted drawer entry
+- optional direct KG writes for high-confidence candidates (`autoExtract.allowKgWrite`)
+- project continuity extracted to diary, with drawer fallback when diary is unavailable
+- dreaming integration: auto-extracted entries that recur across sessions are promoted to KG
+  during the scheduled dreaming pass (`dreaming.autoExtractPromotion`)
 
 Still missing before production cutover:
 

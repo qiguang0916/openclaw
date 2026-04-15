@@ -515,3 +515,95 @@ Notes:
 - Legacy file-backed dreaming writes human-readable narrative output to `DREAMS.md` (or existing `dreams.md`).
 - MemPalace-native dreaming writes diary + drawer + KG outputs and still records events in `memory/.dreams/events.jsonl`.
 - The light/deep/REM phase policy and thresholds are internal behavior, not user-facing config.
+
+### MemPalace dreaming knobs
+
+| Key                                     | Type      | Default     | Description                                   |
+| --------------------------------------- | --------- | ----------- | --------------------------------------------- |
+| `dreaming.enabled`                      | `boolean` | `true`      | Enable or disable dreaming                    |
+| `dreaming.cron`                         | `string`  | `0 3 * * *` | Dreaming schedule                             |
+| `dreaming.timezone`                     | `string`  | system      | Cron timezone                                 |
+| `dreaming.lookbackDays`                 | `number`  | `7`         | Recall lookback window                        |
+| `dreaming.limit`                        | `number`  | `6`         | Max recall aggregates processed per run       |
+| `dreaming.kgThemes`                     | `number`  | `3`         | Max KG theme facts written per dreaming cycle |
+| `dreaming.autoExtractPromotion.enabled` | `boolean` | `true`      | Promote recurring auto-extract entries to KG  |
+| `dreaming.autoExtractPromotion.minHits` | `number`  | `2`         | Min occurrences in lookback window to promote |
+
+---
+
+## Automatic memory extraction (MemPalace)
+
+Automatic extraction runs as a fire-and-forget `agent_end` hook after each
+reply. It scans the current-turn user messages for durable signals and writes
+them to MemPalace drawers (or diary for continuity notes) without blocking the
+reply.
+
+All keys live under `plugins.entries.mempalace-memory.config.autoExtract`.
+
+### Modes
+
+| Mode           | Behavior                                                  |
+| -------------- | --------------------------------------------------------- |
+| `off`          | Disable auto-extraction entirely                          |
+| `conservative` | Strict heuristics; requires explicit persistence markers  |
+| `balanced`     | Broader heuristics; also captures implicit style feedback |
+
+Default mode is `conservative`.
+
+### Config knobs
+
+| Key                      | Type      | Default          | Description                                                   |
+| ------------------------ | --------- | ---------------- | ------------------------------------------------------------- |
+| `enabled`                | `boolean` | `true`           | Enable or disable auto-extraction                             |
+| `mode`                   | `string`  | `"conservative"` | Extraction mode: `off`, `conservative`, `balanced`            |
+| `maxWritesPerTurn`       | `number`  | `2`              | Max drawer/diary writes per eligible turn (1–5)               |
+| `maxSourceChars`         | `number`  | `1500`           | Max characters read from each user message                    |
+| `maxCandidateChars`      | `number`  | `280`            | Max characters per candidate unit                             |
+| `dedupeSimilarity`       | `number`  | `0.92`           | Similarity threshold for duplicate suppression (0.5–0.999)    |
+| `writeSharedUserMemory`  | `boolean` | `true`           | Write user-level facts to shared palace when configured       |
+| `writePrivateContinuity` | `boolean` | `true`           | Write continuity notes to private palace                      |
+| `cooldownTurns`          | `number`  | `0`              | Minimum turns between extraction writes for the same session  |
+| `minConfidence`          | `number`  | `0`              | Minimum candidate priority score required to write (0–100)    |
+| `allowKgWrite`           | `boolean` | `false`          | Allow high-confidence candidates to be written directly to KG |
+| `kgWriteMinConfidence`   | `number`  | `95`             | Minimum priority required for direct KG write (50–100)        |
+
+### Extracted categories
+
+| Category              | Description                                          | Scope   | Default target |
+| --------------------- | ---------------------------------------------------- | ------- | -------------- |
+| `standing_preference` | Stated reply style, language, or format preferences  | shared  | drawer         |
+| `standing_constraint` | Standing instructions to avoid or never do something | shared  | drawer         |
+| `long_term_goal`      | Explicit long-term goals and intentions              | shared  | drawer         |
+| `explicit_remember`   | Direct "remember this" or "记住" instructions        | shared  | drawer         |
+| `project_continuity`  | Continue-later notes and session handoff markers     | private | diary          |
+
+### Full example
+
+```json5
+{
+  plugins: {
+    entries: {
+      "mempalace-memory": {
+        config: {
+          autoExtract: {
+            enabled: true,
+            mode: "conservative",
+            maxWritesPerTurn: 2,
+            dedupeSimilarity: 0.92,
+            writeSharedUserMemory: true,
+            writePrivateContinuity: true,
+            cooldownTurns: 0,
+            allowKgWrite: false,
+          },
+          dreaming: {
+            autoExtractPromotion: {
+              enabled: true,
+              minHits: 2,
+            },
+          },
+        },
+      },
+    },
+  },
+}
+```
