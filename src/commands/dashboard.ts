@@ -41,10 +41,19 @@ export async function dashboardCommand(
   });
   // Avoid embedding externally managed SecretRef tokens in terminal/clipboard/browser args.
   const includeTokenInUrl = token.length > 0 && !resolvedToken.secretRefConfigured;
+
+  // Navigate directly to the first configured agent's session if available.
+  const agentList = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
+  const firstAgentId =
+    agentList.length > 0 && typeof agentList[0]?.id === "string" ? agentList[0].id : null;
+  const sessionPath = firstAgentId
+    ? `chat?session=${encodeURIComponent(`agent:${firstAgentId}:main`)}`
+    : "";
+
   // Prefer URL fragment to avoid leaking auth tokens via query params.
   const dashboardUrl = includeTokenInUrl
-    ? `${links.httpUrl}#token=${encodeURIComponent(token)}`
-    : links.httpUrl;
+    ? `${links.httpUrl}${sessionPath}#token=${encodeURIComponent(token)}`
+    : `${links.httpUrl}${sessionPath}`;
 
   runtime.log(`Dashboard URL: ${dashboardUrl}`);
   if (resolvedToken.secretRefConfigured && token) {
