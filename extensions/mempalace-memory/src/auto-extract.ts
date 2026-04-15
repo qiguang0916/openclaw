@@ -397,14 +397,15 @@ function buildStoredEntry(params: {
   channelId?: string;
   scope: AutoMemoryScope;
 }): string {
-  const capturedAt = new Date().toISOString();
+  // Volatile fields (captured_at, session_id, channel) are intentionally excluded from the
+  // document text so that the stored embedding matches the dedup query embedding. These fields
+  // shift the vector representation without adding semantic signal, pushing cosine similarity
+  // below the dedup threshold for otherwise identical preferences. Timing info is preserved
+  // in ChromaDB metadata (filed_at / filed_at_ts) and in the source_file path.
   const lines = [
     "[AUTO MEMORY]",
     `type: ${params.candidate.category}`,
     `scope: ${params.scope}`,
-    `captured_at: ${capturedAt}`,
-    ...(params.sessionId ? [`session_id: ${params.sessionId}`] : []),
-    ...(params.channelId ? [`channel: ${params.channelId}`] : []),
     `summary: ${params.candidate.summary}`,
     `evidence: ${params.candidate.evidence}`,
   ];
