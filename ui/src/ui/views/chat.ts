@@ -49,6 +49,13 @@ export type ChatProps = {
     owner: string;
     model: string;
     thinking: string;
+    tokens?: {
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      contextWindow: number | null;
+    };
   };
   showThinking: boolean;
   showToolCalls: boolean;
@@ -242,18 +249,18 @@ function resolveWaitingProgressLabel(
   const now = status.tick && status.tick > 0 ? status.tick : Date.now();
   const elapsedSeconds = Math.max(0, Math.floor((now - status.lastActivityAt) / 1000));
   if (status.recovering) {
-    return `进度播报：${status.lastActivityKind ?? "长时间无活动"}，正在自动恢复`;
+    return "检测到响应超时，正在自动恢复…";
   }
-  if (elapsedSeconds <= 5) {
-    return `进度播报：已等待 ${elapsedSeconds} 秒；刚刚有后台活动${status.lastActivityKind ? `，${status.lastActivityKind}` : ""}`;
+  if (elapsedSeconds <= 3) {
+    return null;
   }
   if (elapsedSeconds <= 20) {
-    return `进度播报：已等待 ${elapsedSeconds} 秒；后台最近仍有活动${status.lastActivityKind ? `，${status.lastActivityKind}` : ""}`;
+    return `已等待 ${elapsedSeconds} 秒`;
   }
-  return `进度播报：已等待 ${elapsedSeconds} 秒；最近没有新活动${status.lastActivityKind ? `；最后活动：${status.lastActivityKind}` : ""}`;
+  return `已等待 ${elapsedSeconds} 秒，暂无新动作`;
 }
 
-function resolveWaitingActivityLabel(toolMessages: unknown[], messages: unknown[]): string {
+function resolveWaitingActivityLabel(toolMessages: unknown[], messages: unknown[]): string | null {
   const recentBlock = resolveRecentExecBlockLabel(messages);
   if (recentBlock) {
     return recentBlock;
@@ -264,18 +271,14 @@ function resolveWaitingActivityLabel(toolMessages: unknown[], messages: unknown[
       const card = cards[cardIndex];
       const name = card.name.trim() || "tool";
       if (card.kind === "result") {
-        return isWriteLikeToolName(name)
-          ? `实际活动：最近完成了 ${name} 写入`
-          : `实际活动：最近完成了 ${name}`;
+        return isWriteLikeToolName(name) ? `写入完成：${name}` : `完成：${name}`;
       }
       if (card.kind === "call") {
-        return isWriteLikeToolName(name)
-          ? `实际活动：正在调用 ${name} 写入`
-          : `实际活动：正在调用 ${name}`;
+        return isWriteLikeToolName(name) ? `正在写入：${name}` : `正在调用：${name}`;
       }
     }
   }
-  return "实际活动：尚未观察到任何工具或写入动作";
+  return null;
 }
 
 function renderCompactionIndicator(status: CompactionIndicatorStatus | null | undefined) {
@@ -1377,6 +1380,34 @@ export function renderChat(props: ChatProps) {
                 <span>负责人：${props.composerStatus.owner}</span>
                 <span>模型：${props.composerStatus.model}</span>
                 <span>思考：${props.composerStatus.thinking}</span>
+                ${props.composerStatus.tokens
+                  ? html`<span class="agent-chat__composer-tokens"
+                      >发送 ${formatTokensCompact(props.composerStatus.tokens.input)} · 回复
+                      ${formatTokensCompact(props.composerStatus.tokens.output)}${props
+                        .composerStatus.tokens.cacheRead > 0
+                        ? html` · 缓存命中
+                          ${formatTokensCompact(props.composerStatus.tokens.cacheRead)}`
+                        : nothing}${props.composerStatus.tokens.cacheWrite > 0
+                        ? html` · 写缓存
+                          ${formatTokensCompact(props.composerStatus.tokens.cacheWrite)}`
+                        : nothing}${props.composerStatus.tokens.contextWindow
+                        ? (() => {
+                            const pct = Math.round(
+                              (props.composerStatus.tokens.input /
+                                props.composerStatus.tokens.contextWindow) *
+                                100,
+                            );
+                            return html` ·
+                              <span
+                                class="agent-chat__composer-ctx${pct >= 80
+                                  ? " agent-chat__composer-ctx--warn"
+                                  : ""}"
+                                >上下文 ${pct}%</span
+                              >`;
+                          })()
+                        : nothing}</span
+                    >`
+                  : nothing}
               </div>
             `
           : nothing}

@@ -624,6 +624,13 @@ export type ChatComposerStatus = {
   owner: string;
   model: string;
   thinking: string;
+  tokens?: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    contextWindow: number | null;
+  };
 };
 
 type ChatThinkingTargetModel = {
@@ -846,7 +853,39 @@ export function resolveChatComposerStatus(state: AppViewState): ChatComposerStat
       : (thinkingState.options.find((entry) => entry.value === thinkingState.currentOverride)
           ?.label ?? thinkingState.currentOverride);
 
-  return { owner, model, thinking };
+  const activeRow = state.sessionsResult?.sessions?.find((row) => row.key === state.sessionKey);
+
+  let input = 0;
+  let output = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  if (Array.isArray(state.chatMessages)) {
+    for (const message of state.chatMessages) {
+      const m = message as Record<string, unknown>;
+      if (m.role !== "assistant") {
+        continue;
+      }
+      const usage = m.usage as Record<string, number> | undefined;
+      if (usage) {
+        input += usage.input ?? usage.inputTokens ?? 0;
+        output += usage.output ?? usage.outputTokens ?? 0;
+        cacheRead += usage.cacheRead ?? usage.cache_read_input_tokens ?? 0;
+        cacheWrite += usage.cacheWrite ?? usage.cache_creation_input_tokens ?? 0;
+      }
+    }
+  }
+  // Fall back to session-level counters if messages don't carry usage
+  if (input === 0 && output === 0) {
+    input = activeRow?.inputTokens ?? 0;
+    output = activeRow?.outputTokens ?? 0;
+  }
+
+  const tokens =
+    input > 0 || output > 0
+      ? { input, output, cacheRead, cacheWrite, contextWindow: activeRow?.contextTokens ?? null }
+      : undefined;
+
+  return { owner, model, thinking, tokens };
 }
 
 async function switchChatModel(state: AppViewState, nextModel: string) {

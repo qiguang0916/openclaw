@@ -440,6 +440,19 @@
   overflow-wrap: anywhere;
 }
 
+.agent-chat__composer-tokens {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.agent-chat__composer-ctx {
+  margin-left: 4px;
+}
+
+.agent-chat__composer-ctx--warn {
+  color: var(--warning, #e57c00);
+}
+
 .agent-chat__input > textarea:focus-visible {
   box-shadow: none;
 }
