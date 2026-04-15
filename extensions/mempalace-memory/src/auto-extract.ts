@@ -637,9 +637,9 @@ async function persistContinuityToDiary(params: {
       toolName: "mempalace_diary_write",
       palacePath: resolved.privatePalacePath,
       arguments: {
-        content,
+        agent_name: params.agentId,
+        entry: content,
         topic: params.candidate.summary.slice(0, 80),
-        source_file: sourceFile,
       },
     })) as { success?: boolean; error?: string };
     if (result.success === true) {
