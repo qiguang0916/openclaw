@@ -21,7 +21,12 @@ import {
   resolveMempalaceDreamingConfig,
   type MempalaceDreamingConfig,
 } from "./dreaming-config.js";
-import { dreamingTesting } from "./dreaming-helpers.js";
+import {
+  dreamingTesting,
+  collectAutoExtractPromotionCandidates,
+  buildAutoExtractPromotionKgFacts,
+  type AutoExtractPromotionCandidate,
+} from "./dreaming-helpers.js";
 import { getMempalaceMemorySearchManager } from "./manager.js";
 export { resolveMempalaceDreamingConfig } from "./dreaming-config.js";
 
@@ -106,6 +111,7 @@ export type MempalaceDreamingRunDetails = {
     drawer: boolean;
     kgFacts: number;
   };
+  autoExtractPromotions: number;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -457,6 +463,44 @@ function hasRecentDreamArtifact(params: {
   });
 }
 
+async function writeAutoExtractPromotionFacts(params: {
+  cfg: OpenClawConfig;
+  agentId: string;
+  nowMs: number;
+  candidates: AutoExtractPromotionCandidate[];
+  logger: Logger;
+}): Promise<number> {
+  const resolved = resolveMempalacePluginConfig(params.cfg, params.agentId);
+  if (!resolved.enabled || !resolved.server) {
+    return 0;
+  }
+  const kgFacts = buildAutoExtractPromotionKgFacts({
+    nowMs: params.nowMs,
+    candidates: params.candidates,
+  });
+  let written = 0;
+  const dateStamp = new Date(params.nowMs).toISOString().slice(0, 10);
+  for (const fact of kgFacts) {
+    try {
+      ensureKgFactInMempalace({
+        cfg: params.cfg,
+        agentId: params.agentId,
+        subject: fact.subject,
+        predicate: fact.predicate,
+        object: fact.object,
+        validFrom: fact.validFrom,
+        sourceFile: `auto-extract-promotion://${dateStamp}`,
+      });
+      written += 1;
+    } catch (err) {
+      params.logger.warn(
+        `mempalace-memory: auto-extract promotion KG write failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return written;
+}
+
 async function runMempalaceDreaming(params: {
   cfg: OpenClawConfig;
   agentId: string;
@@ -475,11 +519,48 @@ async function runMempalaceDreaming(params: {
     lookbackDays: params.config.lookbackDays,
     limit: params.config.limit,
   });
-  if (aggregates.length === 0) {
+
+  // Collect auto-extract promotion candidates regardless of recall signal availability.
+  const promotionCandidates = params.config.autoExtractPromotion.enabled
+    ? collectAutoExtractPromotionCandidates({
+        events,
+        nowMs,
+        lookbackDays: params.config.lookbackDays,
+        minHits: params.config.autoExtractPromotion.minHits,
+      })
+    : [];
+
+  if (aggregates.length === 0 && promotionCandidates.length === 0) {
     params.logger.info(
-      "mempalace-memory: dreaming skipped because no recent recall signals were found.",
+      "mempalace-memory: dreaming skipped because no recent recall signals or promotion candidates were found.",
     );
     return null;
+  }
+
+  // Promotion-only path: run lightweight KG promotion without full dreaming passes.
+  if (aggregates.length === 0 && promotionCandidates.length > 0) {
+    const promoted = await writeAutoExtractPromotionFacts({
+      cfg: params.cfg,
+      agentId: params.agentId,
+      nowMs,
+      candidates: promotionCandidates,
+      logger: params.logger,
+    });
+    if (promoted > 0) {
+      params.logger.info(
+        `mempalace-memory: auto-extract promotion promoted ${promoted} fact(s) to KG (no recall signals this cycle).`,
+      );
+    }
+    return {
+      agentId: params.agentId,
+      workspaceDir: params.workspaceDir,
+      aggregateCount: 0,
+      diary: { topic: "dreaming-light" },
+      drawer: { wing: "OpenClaw Dreaming", room: humanizeAgentId(params.agentId) },
+      kgFacts: [],
+      verified: { drawer: false, kgFacts: 0 },
+      autoExtractPromotions: promoted,
+    };
   }
   const { manager, error } = await getMempalaceMemorySearchManager({
     cfg: params.cfg,
@@ -628,8 +709,21 @@ async function runMempalaceDreaming(params: {
         }),
       ),
     ).length;
+    // Auto-extract promotion: promote repeated user facts to KG alongside recall-driven deep facts.
+    const autoExtractPromotions =
+      promotionCandidates.length > 0
+        ? await writeAutoExtractPromotionFacts({
+            cfg: params.cfg,
+            agentId: params.agentId,
+            nowMs,
+            candidates: promotionCandidates,
+            logger: params.logger,
+          })
+        : 0;
+    const promotionSuffix =
+      autoExtractPromotions > 0 ? `, promoted ${autoExtractPromotions} auto-extract fact(s)` : "";
     params.logger.info(
-      `mempalace-memory: dreaming processed light diary + rem drawer + deep KG signals (${aggregates.length} focus item(s), wing=${drawer.wing}, room=${drawer.room}).`,
+      `mempalace-memory: dreaming processed light diary + rem drawer + deep KG signals (${aggregates.length} focus item(s), wing=${drawer.wing}, room=${drawer.room}${promotionSuffix}).`,
     );
     return {
       agentId: params.agentId,
@@ -644,6 +738,7 @@ async function runMempalaceDreaming(params: {
         drawer: verifiedDrawer,
         kgFacts: verifiedKgFacts,
       },
+      autoExtractPromotions,
     };
   } finally {
     await manager.close?.().catch(() => undefined);
@@ -703,6 +798,7 @@ export async function runMempalaceDreamingNow(params: {
       drawer: false,
       kgFacts: 0,
     },
+    autoExtractPromotions: 0,
   };
 }
 

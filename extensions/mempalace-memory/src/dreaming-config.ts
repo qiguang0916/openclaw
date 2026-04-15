@@ -5,6 +5,12 @@ const DEFAULT_DREAMING_LOOKBACK_DAYS = 7;
 const DEFAULT_DREAMING_LIMIT = 6;
 const DEFAULT_DREAMING_KG_THEMES = 3;
 
+export type MempalaceDreamingAutoExtractPromotion = {
+  enabled: boolean;
+  /** Minimum number of times a summary must appear in auto-extract events to qualify for KG promotion. */
+  minHits: number;
+};
+
 export type MempalaceDreamingConfig = {
   enabled: boolean;
   cron: string;
@@ -12,6 +18,7 @@ export type MempalaceDreamingConfig = {
   lookbackDays: number;
   limit: number;
   kgThemes: number;
+  autoExtractPromotion: MempalaceDreamingAutoExtractPromotion;
 };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -42,6 +49,14 @@ function resolvePluginConfig(cfg?: OpenClawConfig): Record<string, unknown> {
   return asRecord(entry?.config) ?? {};
 }
 
+function resolveAutoExtractPromotion(raw: unknown): MempalaceDreamingAutoExtractPromotion {
+  const record = asRecord(raw);
+  return {
+    enabled: record?.enabled !== false,
+    minHits: normalizeNonNegativeInt(record?.minHits, 2),
+  };
+}
+
 export function resolveMempalaceDreamingConfig(cfg?: OpenClawConfig): MempalaceDreamingConfig {
   const pluginConfig = resolvePluginConfig(cfg);
   const dreaming = asRecord(pluginConfig.dreaming);
@@ -52,6 +67,7 @@ export function resolveMempalaceDreamingConfig(cfg?: OpenClawConfig): MempalaceD
     lookbackDays: normalizeNonNegativeInt(dreaming?.lookbackDays, DEFAULT_DREAMING_LOOKBACK_DAYS),
     limit: normalizeNonNegativeInt(dreaming?.limit, DEFAULT_DREAMING_LIMIT),
     kgThemes: normalizeNonNegativeInt(dreaming?.kgThemes, DEFAULT_DREAMING_KG_THEMES),
+    autoExtractPromotion: resolveAutoExtractPromotion(dreaming?.autoExtractPromotion),
   };
 }
 

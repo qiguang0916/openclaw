@@ -11,6 +11,7 @@ describe("resolveMempalaceDreamingConfig", () => {
       lookbackDays: 7,
       limit: 6,
       kgThemes: 3,
+      autoExtractPromotion: { enabled: true, minHits: 2 },
     });
   });
 
@@ -41,6 +42,27 @@ describe("resolveMempalaceDreamingConfig", () => {
       lookbackDays: 3,
       limit: 4,
       kgThemes: 2,
+      autoExtractPromotion: { enabled: true, minHits: 2 },
+    });
+  });
+
+  it("reads explicit autoExtractPromotion config", () => {
+    expect(
+      resolveMempalaceDreamingConfig({
+        plugins: {
+          entries: {
+            "mempalace-memory": {
+              config: {
+                dreaming: {
+                  autoExtractPromotion: { enabled: false, minHits: 5 },
+                },
+              },
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      autoExtractPromotion: { enabled: false, minHits: 5 },
     });
   });
 });
@@ -103,6 +125,7 @@ describe("managed dreaming cron helpers", () => {
       lookbackDays: 7,
       limit: 6,
       kgThemes: 3,
+      autoExtractPromotion: { enabled: true, minHits: 2 },
     });
 
     expect(job).toEqual({
@@ -285,5 +308,325 @@ describe("dream completion events", () => {
         storageMode: "both",
       },
     ]);
+  });
+});
+
+describe("collectAutoExtractPromotionCandidates", () => {
+  const NOW = Date.parse("2026-04-15T12:00:00.000Z");
+
+  function makeExtractEvent(
+    timestamp: string,
+    entries: Array<{
+      category: string;
+      scope: "shared" | "private";
+      summary: string;
+      storage: "drawer" | "diary" | "kg";
+    }>,
+  ) {
+    return {
+      type: "memory.auto_extract.written" as const,
+      timestamp,
+      agentId: "jarvis",
+      written: entries.length,
+      duplicates: 0,
+      skipped: 0,
+      entries,
+    };
+  }
+
+  it("returns empty when there are no auto_extract events", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns empty when hits are below minHits threshold", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-14T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefer concise replies",
+              storage: "drawer",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("returns candidates when hits meet the threshold", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-14T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefer concise replies",
+              storage: "drawer",
+            },
+          ]),
+          makeExtractEvent("2026-04-13T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefer concise replies",
+              storage: "drawer",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([{ category: "standing_preference", summary: "prefer concise replies", hits: 2 }]);
+  });
+
+  it("excludes private-scope entries", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-14T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "private",
+              summary: "private note",
+              storage: "drawer",
+            },
+          ]),
+          makeExtractEvent("2026-04-13T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "private",
+              summary: "private note",
+              storage: "drawer",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("excludes entries already stored in KG", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-14T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefers dark mode",
+              storage: "kg",
+            },
+          ]),
+          makeExtractEvent("2026-04-13T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefers dark mode",
+              storage: "kg",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("excludes events outside the lookback window", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-07T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefer concise replies",
+              storage: "drawer",
+            },
+          ]),
+          makeExtractEvent("2026-04-06T10:00:00.000Z", [
+            {
+              category: "standing_preference",
+              scope: "shared",
+              summary: "prefer concise replies",
+              storage: "drawer",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("excludes non-promotable category project_continuity", () => {
+    expect(
+      __testing.collectAutoExtractPromotionCandidates({
+        events: [
+          makeExtractEvent("2026-04-14T10:00:00.000Z", [
+            {
+              category: "project_continuity",
+              scope: "shared",
+              summary: "continue refactor later",
+              storage: "diary",
+            },
+          ]),
+          makeExtractEvent("2026-04-13T10:00:00.000Z", [
+            {
+              category: "project_continuity",
+              scope: "shared",
+              summary: "continue refactor later",
+              storage: "diary",
+            },
+          ]),
+        ],
+        nowMs: NOW,
+        lookbackDays: 7,
+        minHits: 2,
+      }),
+    ).toEqual([]);
+  });
+
+  it("sorts results by hit count descending", () => {
+    const result = __testing.collectAutoExtractPromotionCandidates({
+      events: [
+        makeExtractEvent("2026-04-14T10:00:00.000Z", [
+          {
+            category: "standing_constraint",
+            scope: "shared",
+            summary: "no emojis",
+            storage: "drawer",
+          },
+          {
+            category: "standing_preference",
+            scope: "shared",
+            summary: "prefer concise replies",
+            storage: "drawer",
+          },
+        ]),
+        makeExtractEvent("2026-04-13T10:00:00.000Z", [
+          {
+            category: "standing_constraint",
+            scope: "shared",
+            summary: "no emojis",
+            storage: "drawer",
+          },
+          {
+            category: "standing_preference",
+            scope: "shared",
+            summary: "prefer concise replies",
+            storage: "drawer",
+          },
+        ]),
+        makeExtractEvent("2026-04-12T10:00:00.000Z", [
+          {
+            category: "standing_constraint",
+            scope: "shared",
+            summary: "no emojis",
+            storage: "drawer",
+          },
+        ]),
+      ],
+      nowMs: NOW,
+      lookbackDays: 7,
+      minHits: 2,
+    });
+    expect(result[0]).toMatchObject({ summary: "no emojis", hits: 3 });
+    expect(result[1]).toMatchObject({ summary: "prefer concise replies", hits: 2 });
+  });
+});
+
+describe("buildAutoExtractPromotionKgFacts", () => {
+  const NOW = Date.parse("2026-04-15T12:00:00.000Z");
+
+  it("maps standing_preference to predicate 'prefers'", () => {
+    expect(
+      __testing.buildAutoExtractPromotionKgFacts({
+        nowMs: NOW,
+        candidates: [
+          { category: "standing_preference", summary: "prefer concise replies", hits: 3 },
+        ],
+      }),
+    ).toEqual([
+      {
+        subject: "User",
+        predicate: "prefers",
+        object: "prefer concise replies",
+        validFrom: "2026-04-15",
+      },
+    ]);
+  });
+
+  it("maps standing_constraint to predicate 'avoids'", () => {
+    expect(
+      __testing.buildAutoExtractPromotionKgFacts({
+        nowMs: NOW,
+        candidates: [{ category: "standing_constraint", summary: "no emojis", hits: 2 }],
+      })[0].predicate,
+    ).toBe("avoids");
+  });
+
+  it("maps long_term_goal to predicate 'has goal'", () => {
+    expect(
+      __testing.buildAutoExtractPromotionKgFacts({
+        nowMs: NOW,
+        candidates: [{ category: "long_term_goal", summary: "launch in 2026", hits: 2 }],
+      })[0].predicate,
+    ).toBe("has goal");
+  });
+
+  it("maps explicit_remember to predicate 'remembers'", () => {
+    expect(
+      __testing.buildAutoExtractPromotionKgFacts({
+        nowMs: NOW,
+        candidates: [{ category: "explicit_remember", summary: "birthday April 15", hits: 2 }],
+      })[0].predicate,
+    ).toBe("remembers");
+  });
+
+  it("excludes unknown categories", () => {
+    expect(
+      __testing.buildAutoExtractPromotionKgFacts({
+        nowMs: NOW,
+        candidates: [{ category: "unknown_category", summary: "something", hits: 3 }],
+      }),
+    ).toEqual([]);
+  });
+
+  it("truncates summary to 200 chars", () => {
+    const facts = __testing.buildAutoExtractPromotionKgFacts({
+      nowMs: NOW,
+      candidates: [{ category: "standing_preference", summary: "a".repeat(250), hits: 2 }],
+    });
+    expect(facts[0].object.length).toBe(200);
+  });
+
+  it("uses 'User' as subject for all facts", () => {
+    const facts = __testing.buildAutoExtractPromotionKgFacts({
+      nowMs: NOW,
+      candidates: [
+        { category: "standing_preference", summary: "pref A", hits: 2 },
+        { category: "long_term_goal", summary: "goal B", hits: 3 },
+      ],
+    });
+    expect(facts.every((f) => f.subject === "User")).toBe(true);
   });
 });

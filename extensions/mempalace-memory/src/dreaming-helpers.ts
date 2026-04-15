@@ -286,6 +286,90 @@ export function resolveDreamingRunTarget(params: {
   };
 }
 
+export type AutoExtractPromotionCandidate = {
+  category: string;
+  summary: string;
+  hits: number;
+};
+
+const AUTO_EXTRACT_PROMOTABLE_CATEGORIES = new Set([
+  "standing_preference",
+  "standing_constraint",
+  "long_term_goal",
+  "explicit_remember",
+]);
+
+const AUTO_EXTRACT_PREDICATE_BY_CATEGORY: Record<string, string> = {
+  standing_preference: "prefers",
+  standing_constraint: "avoids",
+  long_term_goal: "has goal",
+  explicit_remember: "remembers",
+};
+
+export function collectAutoExtractPromotionCandidates(params: {
+  events: MemoryHostEvent[];
+  nowMs: number;
+  lookbackDays: number;
+  minHits: number;
+}): AutoExtractPromotionCandidate[] {
+  const cutoffMs = params.nowMs - params.lookbackDays * 24 * 60 * 60 * 1000;
+  const counts = new Map<string, AutoExtractPromotionCandidate>();
+  for (const event of params.events) {
+    if (event.type !== "memory.auto_extract.written") {
+      continue;
+    }
+    const eventMs = Date.parse(event.timestamp);
+    if (!Number.isFinite(eventMs) || eventMs < cutoffMs) {
+      continue;
+    }
+    for (const entry of event.entries) {
+      if (entry.scope !== "shared" || entry.storage === "kg") {
+        continue;
+      }
+      if (!AUTO_EXTRACT_PROMOTABLE_CATEGORIES.has(entry.category)) {
+        continue;
+      }
+      const summary = entry.summary.trim();
+      if (!summary) {
+        continue;
+      }
+      const key = `${entry.category}\n${summary}`;
+      const current = counts.get(key) ?? { category: entry.category, summary, hits: 0 };
+      counts.set(key, { ...current, hits: current.hits + 1 });
+    }
+  }
+  return [...counts.values()]
+    .filter((c) => c.hits >= params.minHits)
+    .toSorted((a, b) => {
+      if (a.hits !== b.hits) {
+        return b.hits - a.hits;
+      }
+      return a.summary.localeCompare(b.summary);
+    });
+}
+
+export function buildAutoExtractPromotionKgFacts(params: {
+  nowMs: number;
+  candidates: AutoExtractPromotionCandidate[];
+}): Array<{ subject: string; predicate: string; object: string; validFrom: string }> {
+  const validFrom = new Date(params.nowMs).toISOString().slice(0, 10);
+  const facts: Array<{ subject: string; predicate: string; object: string; validFrom: string }> =
+    [];
+  for (const candidate of params.candidates) {
+    const predicate = AUTO_EXTRACT_PREDICATE_BY_CATEGORY[candidate.category];
+    if (!predicate) {
+      continue;
+    }
+    facts.push({
+      subject: "User",
+      predicate,
+      object: candidate.summary.slice(0, 200),
+      validFrom,
+    });
+  }
+  return facts;
+}
+
 export const dreamingTesting = {
   buildManagedDreamingCronJob,
   collectRecentRecallSignals,
@@ -295,6 +379,8 @@ export const dreamingTesting = {
   buildDreamCompletionEvents,
   resolveDreamingRunTarget,
   resolveMempalaceDreamingConfig,
+  collectAutoExtractPromotionCandidates,
+  buildAutoExtractPromotionKgFacts,
   constants: {
     MANAGED_DREAMING_CRON_NAME,
     MANAGED_DREAMING_CRON_TAG,
