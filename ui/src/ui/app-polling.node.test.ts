@@ -1,12 +1,14 @@
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { checkForStaleChatRun } from "./app-polling.ts";
 
+const abortChatRunMock = vi.hoisted(() => vi.fn(async (_host: unknown) => undefined));
 const loadChatHistoryMock = vi.hoisted(() => vi.fn(async () => undefined));
 const flushChatQueueForEventMock = vi.hoisted(() => vi.fn());
 const clearPendingQueueItemsForRunMock = vi.hoisted(() => vi.fn());
 const resetToolStreamMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./controllers/chat.ts", () => ({
+  abortChatRun: (host: unknown) => abortChatRunMock(host),
   loadChatHistory: loadChatHistoryMock,
 }));
 
@@ -52,6 +54,7 @@ describe("checkForStaleChatRun", () => {
   });
 
   it("recovers a stale chat run with no observable activity", async () => {
+    abortChatRunMock.mockClear();
     loadChatHistoryMock.mockClear();
     flushChatQueueForEventMock.mockClear();
     clearPendingQueueItemsForRunMock.mockClear();
@@ -65,6 +68,7 @@ describe("checkForStaleChatRun", () => {
     expect(host.chatRunStartedAt).toBe(0);
     expect(host.chatStream).toBeNull();
     expect(host.chatStreamStartedAt).toBeNull();
+    expect(abortChatRunMock).toHaveBeenCalledWith(host);
     expect(clearPendingQueueItemsForRunMock).toHaveBeenCalledWith(host, "run-1");
     expect(resetToolStreamMock).toHaveBeenCalledWith(host);
     expect(loadChatHistoryMock).toHaveBeenCalledWith(host);
@@ -128,7 +132,8 @@ describe("checkForStaleChatRun", () => {
       ],
     });
 
-    const recovered = await checkForStaleChatRun(host as never, 14_500);
+    // CHAT_STALE_AFTER_VISIBLE_REPLY_MS = 30_000; elapsed must exceed it
+    const recovered = await checkForStaleChatRun(host as never, 31_500);
 
     expect(recovered).toBe(true);
     expect(loadChatHistoryMock).toHaveBeenCalledWith(host);

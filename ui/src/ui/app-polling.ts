@@ -2,7 +2,7 @@ import { clearPendingQueueItemsForRun, flushChatQueueForEvent } from "./app-chat
 import { resetToolStream } from "./app-tool-stream.ts";
 import type { OpenClawApp } from "./app.ts";
 import { extractText } from "./chat/message-extract.ts";
-import { loadChatHistory } from "./controllers/chat.ts";
+import { abortChatRun, loadChatHistory } from "./controllers/chat.ts";
 import { loadDebug } from "./controllers/debug.ts";
 import { loadLogs } from "./controllers/logs.ts";
 import { loadNodes } from "./controllers/nodes.ts";
@@ -10,7 +10,10 @@ import { loadNodes } from "./controllers/nodes.ts";
 const CHAT_STALE_CHECK_INTERVAL_MS = 5000;
 const CHAT_STALE_IDLE_MS = 30000;
 const CHAT_STALE_ACTIVE_MS = 45000;
-const CHAT_STALE_AFTER_VISIBLE_REPLY_MS = 12000;
+// Use a longer threshold when a visible reply exists but streaming/tool activity has stopped:
+// the Pi agent may have sent a block reply and is still issuing the next tool call, so
+// 12 s was too aggressive and caused premature watchdog recovery mid-run.
+const CHAT_STALE_AFTER_VISIBLE_REPLY_MS = 30000;
 
 type PollingHost = {
   nodesPollInterval: number | null;
@@ -93,11 +96,15 @@ export async function checkForStaleChatRun(host: ChatWatchdogHost, now = Date.no
   host.chatProgressTick = now;
   host.chatManualRefreshInFlight = true;
   try {
+    // Abort the server-side agent run so it stops consuming resources and
+    // does not send stale events that could confuse the next run's state.
+    await abortChatRun(host as unknown as OpenClawApp).catch(() => undefined);
     resetToolStream(host as unknown as Parameters<typeof resetToolStream>[0]);
     clearPendingQueueItemsForRun(
       host as unknown as Parameters<typeof clearPendingQueueItemsForRun>[0],
       staleRunId,
     );
+    // Ensure client run state is cleared even if abort already set it to null.
     host.chatRunId = null;
     host.chatRunStartedAt = 0;
     host.chatStream = null;
