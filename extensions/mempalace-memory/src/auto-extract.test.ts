@@ -263,7 +263,7 @@ describe("runMempalaceAutoExtract", () => {
         similarity: 0.97,
         wing: "Jarvis User Preferences",
         room: "User Profile",
-        text: "从现在开始请用中文回复，尽量简洁。",
+        text: "[AUTO MEMORY]\ntype: standing_preference\nsummary: 从现在开始请用中文回复，尽量简洁。",
       },
     ]);
 
@@ -304,6 +304,15 @@ describe("runMempalaceAutoExtract", () => {
       }),
     ]);
     expect(bridgeMocks.writeDrawerDirect).not.toHaveBeenCalled();
+    // Verify the dedup query includes scope and evidence alongside type and summary so
+    // the short-vs-long embedding gap does not push cosine similarity below the threshold.
+    expect(bridgeMocks.searchDrawerMemories).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.stringMatching(
+          /\[AUTO MEMORY\]\ntype: standing_preference\nscope: shared\nsummary:.*\nevidence:/s,
+        ),
+      }),
+    );
   });
 
   it("falls back to private storage when shared writes are unavailable", async () => {
@@ -457,5 +466,109 @@ describe("runMempalaceAutoExtract", () => {
     expect(results).toHaveLength(0);
     expect(bridgeMocks.writeDrawerDirect).not.toHaveBeenCalled();
     expect(bridgeMocks.callMempalaceTool).not.toHaveBeenCalled();
+  });
+
+  // S-02: search error during dedupe must not block the write path
+  it("writes candidate when duplicate search throws (S-02)", async () => {
+    bridgeMocks.searchDrawerMemories.mockRejectedValue(new Error("vector store unavailable"));
+
+    const api = createTestPluginApi({
+      config: {
+        plugins: {
+          slots: { memory: "mempalace-memory" },
+          entries: { "mempalace-memory": { enabled: true } },
+        },
+      } as never,
+    });
+
+    const results = await runMempalaceAutoExtract({
+      api,
+      event: {
+        success: true,
+        messages: [
+          { role: "user", content: "从现在开始请用中文回复，尽量简洁。" },
+          { role: "assistant", content: "好的。" },
+        ],
+      },
+      ctx: { agentId: "jarvis", sessionId: "session-s02", trigger: "user" },
+    });
+
+    // Write still proceeds best-effort when dedup search fails.
+    expect(results).toEqual([
+      expect.objectContaining({ status: "written", category: "standing_preference" }),
+    ]);
+    expect(bridgeMocks.writeDrawerDirect).toHaveBeenCalled();
+  });
+
+  // S-03: FTS sync failure must not fail the durable drawer write
+  it("durable write succeeds when FTS sync fails (S-03)", async () => {
+    bridgeMocks.writeFtsEntry.mockRejectedValue(new Error("FTS index broken"));
+
+    const api = createTestPluginApi({
+      config: {
+        plugins: {
+          slots: { memory: "mempalace-memory" },
+          entries: { "mempalace-memory": { enabled: true } },
+        },
+      } as never,
+    });
+
+    const results = await runMempalaceAutoExtract({
+      api,
+      event: {
+        success: true,
+        messages: [
+          { role: "user", content: "从现在开始请用中文回复，尽量简洁。" },
+          { role: "assistant", content: "好的。" },
+        ],
+      },
+      ctx: { agentId: "jarvis", sessionId: "session-s03", trigger: "user" },
+    });
+
+    // Drawer write succeeds; FTS is best-effort fire-and-forget.
+    expect(results).toEqual([expect.objectContaining({ status: "written", storage: "drawer" })]);
+  });
+
+  // F-16 / S-04: high-confidence KG write is fire-and-forget; its failure must not fail the drawer write
+  it("writes to KG for high-confidence candidates and KG failure does not fail drawer write (F-16/S-04)", async () => {
+    // Make KG write fail after the drawer write succeeds.
+    bridgeMocks.callMempalaceTool.mockRejectedValue(new Error("KG backend unavailable"));
+
+    const api = createTestPluginApi({
+      config: {
+        plugins: {
+          slots: { memory: "mempalace-memory" },
+          entries: {
+            "mempalace-memory": {
+              enabled: true,
+              config: { autoExtract: { allowKgWrite: true, kgWriteMinConfidence: 95 } },
+            },
+          },
+        },
+      } as never,
+    });
+
+    // "记住这个" triggers explicit_remember → standing_preference with priority 100 (≥ 95 kgWriteMinConfidence)
+    const results = await runMempalaceAutoExtract({
+      api,
+      event: {
+        success: true,
+        messages: [
+          { role: "user", content: "记住这个：以后先给结论，再给细节。" },
+          { role: "assistant", content: "好的，记下来了。" },
+        ],
+      },
+      ctx: { agentId: "jarvis", sessionId: "session-f16", trigger: "user" },
+    });
+
+    // Drawer write must succeed even if KG write throws.
+    expect(results).toEqual([expect.objectContaining({ status: "written", storage: "drawer" })]);
+    expect(bridgeMocks.writeDrawerDirect).toHaveBeenCalled();
+    // KG write is triggered asynchronously for the high-confidence candidate.
+    await vi.waitFor(() =>
+      expect(bridgeMocks.callMempalaceTool).toHaveBeenCalledWith(
+        expect.objectContaining({ toolName: "mempalace_kg_add" }),
+      ),
+    );
   });
 });

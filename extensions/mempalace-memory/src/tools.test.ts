@@ -27,6 +27,41 @@ vi.mock("./bridge.js", () => ({
 vi.mock("./config.js", () => ({
   resolveMempalacePluginConfig: () => configState.resolved,
 }));
+// Prevent the memory-core-engine-runtime.ts → facade-runtime.ts → jiti chain
+// from loading during Vitest thread worker startup. These modules have
+// module-level side effects (jiti loader setup, filesystem traversal) that
+// can block the Vitest worker thread when run as a standalone test file.
+vi.mock("openclaw/plugin-sdk/memory-core", () => ({
+  jsonResult: (data: unknown) => ({ details: data }),
+  readNumberParam: (params: Record<string, unknown>, key: string) =>
+    typeof params[key] === "number" ? params[key] : undefined,
+  readStringParam: (
+    params: Record<string, unknown>,
+    key: string,
+    opts?: { required?: boolean },
+  ) => {
+    const v = params[key];
+    if (typeof v === "string") {
+      return v;
+    }
+    if (opts?.required) {
+      throw new Error(`Missing required param: ${key}`);
+    }
+    return undefined;
+  },
+  resolveAgentWorkspaceDir: () => null,
+  resolveSessionAgentId: (params: { sessionKey?: string }) =>
+    params.sessionKey?.split(":").at(-1) ?? "default",
+  type: {},
+}));
+// Prevent manager.ts from loading memory-core-host-runtime-files and its
+// transitive core imports.
+vi.mock("./manager.js", () => ({
+  getMempalaceMemorySearchManager: vi.fn(),
+}));
+vi.mock("./recall-events.js", () => ({
+  queueRecallEvent: vi.fn(),
+}));
 
 describe("mempalace-memory native tools", () => {
   beforeEach(() => {

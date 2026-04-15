@@ -444,12 +444,24 @@ async function persistCandidate(params: {
   });
 
   try {
+    // Build a query that matches the stored document structure (stable fields only, no timestamp
+    // or session_id). Including scope and evidence alongside type and summary closes the
+    // short-vs-long embedding gap that previously pushed cosine similarity below the 0.92 threshold.
+    const dedupeQuery = [
+      "[AUTO MEMORY]",
+      `type: ${params.candidate.category}`,
+      `scope: ${scope}`,
+      `summary: ${params.candidate.summary}`,
+      `evidence: ${params.candidate.evidence}`,
+    ]
+      .join("\n")
+      .slice(0, 300);
     const top = (
       await searchDrawerMemories({
         cfg: params.api.config,
         agentId: params.agentId,
         palacePath,
-        query: params.candidate.summary.slice(0, 300),
+        query: dedupeQuery,
         maxResults: 1,
         wing,
         room,
@@ -638,8 +650,13 @@ async function persistContinuityToDiary(params: {
         storage: "diary",
       };
     }
-  } catch {
-    // Fall through to drawer fallback below.
+    params.api.logger.warn(
+      `mempalace-memory: auto-extract diary write returned failure, falling back to drawer: ${result.error ?? "unknown"}`,
+    );
+  } catch (error) {
+    params.api.logger.warn(
+      `mempalace-memory: auto-extract diary write threw, falling back to drawer: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   // Diary unavailable — fall back to drawer so continuity is not lost.
   // Write directly to avoid re-entering the diary routing path.
