@@ -552,21 +552,30 @@ Default mode is `conservative`.
 
 ### Config knobs
 
-| Key                      | Type      | Default          | Description                                                                                                            |
-| ------------------------ | --------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `enabled`                | `boolean` | `true`           | Enable or disable auto-extraction                                                                                      |
-| `mode`                   | `string`  | `"conservative"` | Extraction mode: `off`, `conservative`, `balanced`                                                                     |
-| `maxWritesPerTurn`       | `number`  | `2`              | Max drawer/diary writes per eligible turn (1–5)                                                                        |
-| `maxSourceChars`         | `number`  | `1500`           | Max characters read from each user message                                                                             |
-| `maxCandidateChars`      | `number`  | `280`            | Max characters per candidate unit                                                                                      |
-| `dedupeSimilarity`       | `number`  | `0.92`           | Similarity threshold for duplicate suppression (0.5–0.999)                                                             |
-| `writeSharedUserMemory`  | `boolean` | `true`           | Write user-level facts to shared palace when configured                                                                |
-| `writePrivateContinuity` | `boolean` | `true`           | Write continuity notes to private palace                                                                               |
-| `cooldownTurns`          | `number`  | `0`              | Minimum turns between writes **per session** (not global). 0 = no cooldown.                                            |
-| `minConfidence`          | `number`  | `0`              | Minimum candidate priority score required to write (0–100)                                                             |
-| `allowKgWrite`           | `boolean` | `false`          | Allow high-confidence candidates to be written directly to KG                                                          |
-| `kgWriteMinConfidence`   | `number`  | `95`             | Minimum priority required for direct KG write (50–100)                                                                 |
-| `userIdentity`           | `string`  | `"User"`         | KG subject label for extracted user facts. Set per-deployment when a palace is shared across multiple user identities. |
+| Key                      | Type      | Default          | Description                                                                                                                                                                                                     |
+| ------------------------ | --------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enabled`                | `boolean` | `true`           | Enable or disable auto-extraction                                                                                                                                                                               |
+| `mode`                   | `string`  | `"conservative"` | Extraction mode: `off`, `conservative`, `balanced`                                                                                                                                                              |
+| `maxWritesPerTurn`       | `number`  | `2`              | Max drawer/diary writes per eligible turn (1–5)                                                                                                                                                                 |
+| `maxSourceChars`         | `number`  | `1500`           | Max characters read from each user message                                                                                                                                                                      |
+| `maxCandidateChars`      | `number`  | `280`            | Max characters per candidate unit                                                                                                                                                                               |
+| `dedupeSimilarity`       | `number`  | `0.92`           | Cosine similarity threshold for duplicate suppression (0.5–0.999). A candidate is suppressed when the top result from a pre-write vector search against the target wing and room scores at or above this value. |
+| `writeSharedUserMemory`  | `boolean` | `true`           | Write user-level facts to shared palace when configured                                                                                                                                                         |
+| `writePrivateContinuity` | `boolean` | `true`           | Write continuity notes to private palace                                                                                                                                                                        |
+| `cooldownTurns`          | `number`  | `0`              | Minimum turns between writes **per session** (not global). 0 = no cooldown.                                                                                                                                     |
+| `minConfidence`          | `number`  | `0`              | Minimum candidate priority score required to write (0–100)                                                                                                                                                      |
+| `allowKgWrite`           | `boolean` | `false`          | Allow high-confidence candidates to be written directly to KG                                                                                                                                                   |
+| `kgWriteMinConfidence`   | `number`  | `95`             | Minimum priority required for direct KG write (50–100)                                                                                                                                                          |
+| `userIdentity`           | `string`  | `"User"`         | KG subject label for extracted user facts. Set per-deployment when a palace is shared across multiple user identities.                                                                                          |
+
+<Info>
+`dedupeSimilarity` relies on the pre-write similarity check described in
+[Automatic Memory Extraction](/concepts/memory-auto-extract#duplicate-suppression).
+Stored document text uses a canonical form (type, scope, summary, evidence only)
+so the stored embedding is directly comparable to the dedup query. Volatile
+fields such as timestamps are stored in ChromaDB metadata, not in the document
+body.
+</Info>
 
 ### Extracted categories
 

@@ -87,6 +87,24 @@ multi-agent awareness. Plugin install.
 </Card>
 </CardGroup>
 
+## Automatic memory extraction
+
+When `mempalace-memory` is the active memory plugin, OpenClaw silently captures
+durable facts from every conversation turn without the agent calling tools
+explicitly. After each reply, a background hook scans the user turn for:
+
+- stated preferences and constraints
+- explicit "remember this" instructions
+- long-term goals
+- session handoff and continuity notes
+
+Extracted entries are written to MemPalace drawers or diary. Before each write,
+a vector similarity check suppresses near-duplicate entries so the same
+preference is not stored repeatedly.
+
+For full details on how extraction works, the dedup mechanism, storage format
+design, and observability, see [Automatic Memory Extraction](/concepts/memory-auto-extract).
+
 ## Automatic memory flush
 
 Before [compaction](/concepts/compaction) summarizes your conversation, OpenClaw
@@ -130,6 +148,7 @@ openclaw memory index --force   # Rebuild the index
 
 ## Further reading
 
+- [Automatic Memory Extraction](/concepts/memory-auto-extract) -- how passive per-turn extraction, dedup, and diary routing work
 - [Builtin Memory Engine](/concepts/memory-builtin) -- legacy SQLite compatibility backend
 - [QMD Memory Engine](/concepts/memory-qmd) -- optional sidecar for the legacy `memory-core` lane
 - [Honcho Memory](/concepts/memory-honcho) -- AI-native cross-session memory
