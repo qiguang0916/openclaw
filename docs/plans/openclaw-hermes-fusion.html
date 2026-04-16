@@ -1,0 +1,1862 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>OpenClaw × Hermes · 智能融合架构方案</title>
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --bg2: #0f1525;
+    --bg3: #141c30;
+    --surface: #1a2340;
+    --surface2: #1e2a4a;
+    --border: rgba(99,179,237,0.15);
+    --border2: rgba(99,179,237,0.08);
+    --blue: #63b3ed;
+    --blue2: #4299e1;
+    --purple: #9f7aea;
+    --purple2: #805ad5;
+    --green: #68d391;
+    --green2: #48bb78;
+    --orange: #f6ad55;
+    --red: #fc8181;
+    --cyan: #76e4f7;
+    --pink: #f687b3;
+    --text: #e2e8f0;
+    --text2: #a0aec0;
+    --text3: #718096;
+    --glow-blue: 0 0 20px rgba(99,179,237,0.3);
+    --glow-purple: 0 0 20px rgba(159,122,234,0.3);
+    --glow-green: 0 0 20px rgba(104,211,145,0.3);
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.7;
+    overflow-x: hidden;
+  }
+
+  /* ── SCROLLBAR ── */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--surface2); border-radius: 3px; }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    background: rgba(10,14,26,0.85);
+    backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border2);
+    padding: 0 40px;
+    height: 56px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .nav-brand {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 15px; font-weight: 600;
+  }
+  .nav-brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--blue); box-shadow: var(--glow-blue); animation: pulse 2s infinite; }
+  .nav-links { display: flex; gap: 28px; }
+  .nav-links a {
+    color: var(--text2); text-decoration: none; font-size: 13px;
+    transition: color .2s;
+  }
+  .nav-links a:hover { color: var(--blue); }
+  .nav-badge {
+    background: linear-gradient(135deg, var(--blue2), var(--purple2));
+    color: white; font-size: 11px; padding: 3px 10px; border-radius: 20px;
+    font-weight: 600;
+  }
+
+  /* ── HERO ── */
+  .hero {
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    position: relative; overflow: hidden;
+    padding: 100px 40px 60px;
+  }
+  .hero-bg {
+    position: absolute; inset: 0; pointer-events: none;
+  }
+  .hero-bg::before {
+    content: '';
+    position: absolute;
+    top: -200px; left: 50%; transform: translateX(-50%);
+    width: 1200px; height: 800px;
+    background: radial-gradient(ellipse, rgba(99,179,237,0.06) 0%, transparent 70%);
+    animation: heroGlow 8s ease-in-out infinite alternate;
+  }
+  .hero-bg::after {
+    content: '';
+    position: absolute;
+    bottom: -100px; right: -200px;
+    width: 600px; height: 600px;
+    background: radial-gradient(circle, rgba(159,122,234,0.05) 0%, transparent 60%);
+    animation: heroGlow 6s ease-in-out infinite alternate-reverse;
+  }
+  @keyframes heroGlow { from { opacity: .5; } to { opacity: 1; } }
+
+  /* Grid BG */
+  .grid-bg {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(99,179,237,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(99,179,237,0.03) 1px, transparent 1px);
+    background-size: 50px 50px;
+  }
+
+  .hero-content { position: relative; z-index: 1; text-align: center; max-width: 900px; }
+  .hero-tag {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: rgba(99,179,237,0.1); border: 1px solid rgba(99,179,237,0.2);
+    color: var(--blue); font-size: 12px; font-weight: 600;
+    padding: 6px 16px; border-radius: 20px; margin-bottom: 32px;
+    letter-spacing: .05em; text-transform: uppercase;
+    animation: fadeInDown .8s ease;
+  }
+  .hero-tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--blue); animation: pulse 2s infinite; }
+
+  .hero h1 {
+    font-size: clamp(42px, 7vw, 80px);
+    font-weight: 800;
+    line-height: 1.1;
+    margin-bottom: 8px;
+    animation: fadeInUp .8s ease .1s both;
+  }
+  .hero h1 .oc { color: var(--blue); }
+  .hero h1 .x { color: var(--text3); margin: 0 12px; }
+  .hero h1 .hm { color: var(--purple); }
+  .hero-sub {
+    font-size: clamp(16px, 2vw, 22px);
+    color: var(--text2); margin-bottom: 48px; font-weight: 300;
+    animation: fadeInUp .8s ease .2s both;
+  }
+  .hero-sub strong { color: var(--text); font-weight: 600; }
+
+  .hero-stats {
+    display: flex; gap: 40px; justify-content: center; flex-wrap: wrap;
+    animation: fadeInUp .8s ease .3s both;
+  }
+  .stat-item { text-align: center; }
+  .stat-num {
+    font-size: 36px; font-weight: 800;
+    background: linear-gradient(135deg, var(--blue), var(--cyan));
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  }
+  .stat-num.purple { background: linear-gradient(135deg, var(--purple), var(--pink)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .stat-num.green { background: linear-gradient(135deg, var(--green), var(--cyan)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .stat-label { font-size: 12px; color: var(--text3); margin-top: 2px; }
+
+  .hero-scroll {
+    position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%);
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    color: var(--text3); font-size: 11px; letter-spacing: .1em;
+    animation: bounce 2s infinite;
+  }
+  .hero-scroll::after {
+    content: ''; width: 1px; height: 30px;
+    background: linear-gradient(var(--text3), transparent);
+  }
+
+  /* ── SECTION ── */
+  section { padding: 80px 40px; max-width: 1200px; margin: 0 auto; }
+  .section-full { max-width: none; }
+
+  .section-header { text-align: center; margin-bottom: 56px; }
+  .section-tag {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--blue); margin-bottom: 16px;
+  }
+  .section-tag::before, .section-tag::after {
+    content: ''; flex: 1; height: 1px; background: var(--border); min-width: 40px;
+  }
+  h2 {
+    font-size: clamp(28px, 4vw, 44px);
+    font-weight: 800; margin-bottom: 16px;
+  }
+  .section-desc { color: var(--text2); font-size: 17px; max-width: 600px; margin: 0 auto; }
+
+  /* ── DIVIDER ── */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent, var(--border), transparent);
+    margin: 0 40px;
+  }
+
+  /* ── PROBLEM CARDS ── */
+  .problem-grid {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+  }
+  .problem-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 16px; padding: 28px;
+    position: relative; overflow: hidden;
+    transition: transform .3s, box-shadow .3s, border-color .3s;
+  }
+  .problem-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+    border-color: var(--border);
+  }
+  .problem-card::before {
+    content: ''; position: absolute;
+    top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, var(--red), var(--orange));
+  }
+  .problem-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    background: rgba(252,129,129,0.1); border: 1px solid rgba(252,129,129,0.2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; margin-bottom: 16px;
+  }
+  .problem-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 10px; }
+  .problem-card p { color: var(--text2); font-size: 14px; line-height: 1.6; }
+
+  /* ── VS COMPARE ── */
+  .vs-grid {
+    display: grid; grid-template-columns: 1fr auto 1fr; gap: 0; align-items: stretch;
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 20px; overflow: hidden;
+  }
+  .vs-col { padding: 32px; }
+  .vs-col.bad { opacity: .7; }
+  .vs-col.good { background: rgba(99,179,237,0.04); }
+  .vs-divider {
+    display: flex; align-items: center; justify-content: center;
+    background: var(--surface2); width: 56px;
+    font-size: 18px; font-weight: 800; color: var(--text3);
+  }
+  .vs-col h3 { font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--text2); text-transform: uppercase; letter-spacing: .05em; }
+  .vs-item {
+    display: flex; align-items: center; gap: 10px;
+    font-size: 14px; padding: 8px 0;
+    border-bottom: 1px solid var(--border2);
+  }
+  .vs-item:last-child { border: none; }
+  .vs-item .icon { font-size: 16px; flex-shrink: 0; }
+  .vs-col.bad .vs-item { color: var(--text3); text-decoration: line-through; }
+  .vs-col.good .vs-item { color: var(--text); }
+
+  /* ── CAPABILITY TABLE ── */
+  .cap-grid {
+    display: grid;
+    grid-template-columns: 180px 1fr 1fr 1fr;
+    border: 1px solid var(--border2);
+    border-radius: 16px; overflow: hidden;
+  }
+  .cap-header {
+    display: contents;
+  }
+  .cap-cell {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border2);
+    border-right: 1px solid var(--border2);
+    font-size: 13px;
+  }
+  .cap-cell:nth-child(4n) { border-right: none; }
+  .cap-cell.head {
+    background: var(--surface2);
+    font-weight: 700; font-size: 12px;
+    text-transform: uppercase; letter-spacing: .05em;
+    color: var(--text2);
+  }
+  .cap-cell.label { color: var(--text2); }
+  .bar-wrap { display: flex; align-items: center; gap: 10px; }
+  .bar { height: 6px; border-radius: 3px; flex: 1; background: var(--bg3); position: relative; overflow: hidden; }
+  .bar-fill {
+    height: 100%; border-radius: 3px;
+    animation: barGrow 1.2s ease .5s both;
+    transform-origin: left;
+  }
+  @keyframes barGrow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  .bar-label { font-size: 12px; color: var(--text3); width: 30px; text-align: right; }
+
+  /* ── ARCH DIAGRAM ── */
+  .arch-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 24px;
+    padding: 48px 40px;
+    position: relative; overflow: hidden;
+  }
+  .arch-wrap::before {
+    content: '';
+    position: absolute; top: -100px; right: -100px;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(99,179,237,0.04) 0%, transparent 60%);
+    pointer-events: none;
+  }
+
+  .arch-layers { display: flex; flex-direction: column; gap: 0; }
+
+  .arch-layer {
+    border: 1px solid; border-radius: 16px;
+    padding: 20px 24px; position: relative;
+    transition: box-shadow .3s;
+  }
+  .arch-layer:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+
+  .arch-layer.l0 { border-color: rgba(118,228,247,0.25); background: rgba(118,228,247,0.03); }
+  .arch-layer.l1 { border-color: rgba(99,179,237,0.25); background: rgba(99,179,237,0.03); }
+  .arch-layer.l2 { border-color: rgba(159,122,234,0.25); background: rgba(159,122,234,0.03); }
+  .arch-layer.l3 { border-color: rgba(104,211,145,0.25); background: rgba(104,211,145,0.03); }
+  .arch-layer.l4 { border-color: rgba(246,173,85,0.25); background: rgba(246,173,85,0.03); }
+
+  .layer-badge {
+    position: absolute; top: -11px; left: 20px;
+    font-size: 10px; font-weight: 700; letter-spacing: .1em;
+    text-transform: uppercase; padding: 3px 10px; border-radius: 20px;
+  }
+  .l0 .layer-badge { background: rgba(118,228,247,0.15); color: var(--cyan); border: 1px solid rgba(118,228,247,0.3); }
+  .l1 .layer-badge { background: rgba(99,179,237,0.15); color: var(--blue); border: 1px solid rgba(99,179,237,0.3); }
+  .l2 .layer-badge { background: rgba(159,122,234,0.15); color: var(--purple); border: 1px solid rgba(159,122,234,0.3); }
+  .l3 .layer-badge { background: rgba(104,211,145,0.15); color: var(--green); border: 1px solid rgba(104,211,145,0.3); }
+  .l4 .layer-badge { background: rgba(246,173,85,0.15); color: var(--orange); border: 1px solid rgba(246,173,85,0.3); }
+
+  .layer-title { font-size: 14px; font-weight: 700; margin-bottom: 14px; }
+  .l0 .layer-title { color: var(--cyan); }
+  .l1 .layer-title { color: var(--blue); }
+  .l2 .layer-title { color: var(--purple); }
+  .l3 .layer-title { color: var(--green); }
+  .l4 .layer-title { color: var(--orange); }
+
+  .channel-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .chip {
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 6px 14px;
+    font-size: 13px; font-weight: 500;
+    transition: all .2s;
+  }
+  .chip:hover { border-color: var(--border); background: var(--surface); transform: translateY(-1px); }
+  .chip.cyan { border-color: rgba(118,228,247,0.2); color: var(--cyan); }
+  .chip.blue { border-color: rgba(99,179,237,0.2); color: var(--blue); }
+  .chip.purple { border-color: rgba(159,122,234,0.2); color: var(--purple); }
+  .chip.green { border-color: rgba(104,211,145,0.2); color: var(--green); }
+  .chip.orange { border-color: rgba(246,173,85,0.2); color: var(--orange); }
+
+  /* L2 Jarvis + Teams */
+  .l2-inner { display: flex; flex-direction: column; gap: 16px; }
+  .jarvis-box {
+    background: rgba(159,122,234,0.08);
+    border: 1px solid rgba(159,122,234,0.2);
+    border-radius: 12px; padding: 16px 20px;
+    display: flex; align-items: center; gap: 16px;
+    position: relative;
+  }
+  .jarvis-label {
+    font-size: 16px; font-weight: 800; color: var(--purple);
+  }
+  .jarvis-desc { font-size: 13px; color: var(--text2); }
+  .jarvis-model { margin-left: auto; }
+
+  .teams-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .team-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px; padding: 16px;
+    transition: all .3s; cursor: default;
+  }
+  .team-card:hover {
+    border-color: rgba(159,122,234,0.3);
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  }
+  .team-card-name { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+  .team-card-workers { display: flex; flex-direction: column; gap: 4px; }
+  .worker-chip {
+    font-size: 11px; padding: 2px 8px; border-radius: 4px;
+    background: var(--bg3); color: var(--text3);
+  }
+
+  /* MCP Arrow */
+  .mcp-bridge {
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px 0; gap: 16px; position: relative;
+  }
+  .mcp-line {
+    flex: 1; height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(99,179,237,0.3), transparent);
+    position: relative;
+  }
+  .mcp-line::before {
+    content: '▲'; position: absolute; left: 30%;
+    top: -8px; font-size: 10px; color: var(--blue); opacity: .6;
+  }
+  .mcp-line::after {
+    content: '▼'; position: absolute; right: 30%;
+    top: -8px; font-size: 10px; color: var(--blue); opacity: .6;
+  }
+  .mcp-badge {
+    background: rgba(99,179,237,0.1); border: 1px solid rgba(99,179,237,0.25);
+    color: var(--blue); font-size: 12px; font-weight: 700;
+    padding: 6px 16px; border-radius: 20px; white-space: nowrap;
+    animation: pulse 3s infinite;
+  }
+
+  /* L3 Hermes Twins */
+  .hermes-twins { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 12px; }
+  .twin-card {
+    background: rgba(104,211,145,0.05);
+    border: 1px solid rgba(104,211,145,0.15);
+    border-radius: 12px; padding: 16px;
+    transition: all .3s;
+  }
+  .twin-card:hover {
+    border-color: rgba(104,211,145,0.3);
+    background: rgba(104,211,145,0.08);
+    transform: translateY(-2px);
+  }
+  .twin-name { font-size: 14px; font-weight: 700; color: var(--green); margin-bottom: 6px; }
+  .twin-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+  .twin-tools { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+  .twin-tool {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(104,211,145,0.1); color: var(--green2);
+    border: 1px solid rgba(104,211,145,0.15);
+  }
+  .meta-card {
+    background: rgba(104,211,145,0.03);
+    border: 1px solid rgba(104,211,145,0.1);
+    border-radius: 12px; padding: 14px 20px;
+    display: flex; align-items: center; gap: 16px;
+  }
+  .meta-label { font-size: 13px; font-weight: 700; color: var(--green2); }
+  .meta-desc { font-size: 12px; color: var(--text2); }
+  .core-engines { display: flex; gap: 8px; margin-left: auto; }
+  .engine-chip {
+    font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    background: rgba(104,211,145,0.08); color: var(--green2);
+    border: 1px solid rgba(104,211,145,0.15);
+  }
+
+  /* L4 Knowledge */
+  .knowledge-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .know-card {
+    background: rgba(246,173,85,0.04);
+    border: 1px solid rgba(246,173,85,0.12);
+    border-radius: 12px; padding: 16px 20px;
+  }
+  .know-card h4 { font-size: 13px; font-weight: 700; color: var(--orange); margin-bottom: 6px; }
+  .know-card p { font-size: 12px; color: var(--text2); }
+  .know-arrow {
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: var(--orange); opacity: .6;
+  }
+
+  /* ── EVOLUTION LOOP ── */
+  .loop-wrap {
+    position: relative;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 24px; padding: 48px;
+  }
+  .loop-steps {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 0;
+    position: relative;
+  }
+  .loop-steps::before {
+    content: ''; position: absolute;
+    top: 44px; left: 10%; right: 10%; height: 2px;
+    background: linear-gradient(90deg, var(--blue), var(--purple), var(--green), var(--orange));
+    z-index: 0;
+  }
+  .loop-step {
+    display: flex; flex-direction: column; align-items: center;
+    text-align: center; padding: 0 16px; position: relative; z-index: 1;
+  }
+  .step-num {
+    width: 48px; height: 48px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; font-weight: 800;
+    margin-bottom: 16px;
+    position: relative;
+  }
+  .step-num::after {
+    content: ''; position: absolute; inset: -4px;
+    border-radius: 50%; border: 1px solid;
+    animation: spin 8s linear infinite;
+    opacity: .4;
+  }
+  .step-1 .step-num { background: rgba(99,179,237,0.15); color: var(--blue); border: 2px solid rgba(99,179,237,0.3); }
+  .step-1 .step-num::after { border-color: var(--blue); }
+  .step-2 .step-num { background: rgba(159,122,234,0.15); color: var(--purple); border: 2px solid rgba(159,122,234,0.3); }
+  .step-2 .step-num::after { border-color: var(--purple); animation-direction: reverse; }
+  .step-3 .step-num { background: rgba(104,211,145,0.15); color: var(--green); border: 2px solid rgba(104,211,145,0.3); }
+  .step-3 .step-num::after { border-color: var(--green); }
+  .step-4 .step-num { background: rgba(246,173,85,0.15); color: var(--orange); border: 2px solid rgba(246,173,85,0.3); }
+  .step-4 .step-num::after { border-color: var(--orange); animation-direction: reverse; }
+
+  .loop-step h4 { font-size: 14px; font-weight: 700; margin-bottom: 8px; }
+  .loop-step p { font-size: 13px; color: var(--text2); line-height: 1.5; }
+
+  .loop-bottom {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-top: 40px;
+  }
+  .loop-detail {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px; padding: 20px;
+    transition: all .3s;
+  }
+  .loop-detail:hover { border-color: var(--border); transform: translateY(-2px); }
+  .loop-detail h5 { font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+  .loop-detail ul { list-style: none; }
+  .loop-detail li {
+    font-size: 12px; color: var(--text2); padding: 4px 0;
+    display: flex; align-items: flex-start; gap: 6px;
+  }
+  .loop-detail li::before { content: '›'; color: var(--blue); flex-shrink: 0; margin-top: 1px; }
+
+  /* ── TEAM TOPO ── */
+  .topo-wrap {
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: 24px; padding: 48px;
+  }
+  .topo-center {
+    display: flex; justify-content: center; margin-bottom: 32px;
+  }
+  .jarvis-node {
+    background: linear-gradient(135deg, rgba(159,122,234,0.15), rgba(99,179,237,0.1));
+    border: 1px solid rgba(159,122,234,0.3);
+    border-radius: 20px; padding: 24px 40px;
+    text-align: center; position: relative;
+    box-shadow: 0 0 40px rgba(159,122,234,0.1);
+  }
+  .jarvis-node::before {
+    content: ''; position: absolute; inset: -1px;
+    border-radius: 21px;
+    background: linear-gradient(135deg, rgba(159,122,234,0.3), rgba(99,179,237,0.3));
+    z-index: -1; animation: borderPulse 3s ease infinite;
+  }
+  @keyframes borderPulse { 0%, 100% { opacity: .5; } 50% { opacity: 1; } }
+  .jarvis-node .name { font-size: 24px; font-weight: 800; color: var(--purple); }
+  .jarvis-node .role { font-size: 13px; color: var(--text2); margin-top: 4px; }
+  .jarvis-node .model-tag {
+    display: inline-block; margin-top: 10px;
+    font-size: 11px; background: rgba(99,179,237,0.1);
+    color: var(--blue); padding: 3px 10px; border-radius: 10px;
+    border: 1px solid rgba(99,179,237,0.2);
+  }
+
+  /* Connector lines */
+  .topo-connector-row {
+    display: flex; justify-content: center; position: relative; height: 40px;
+  }
+  .connector-main {
+    width: 1px; background: linear-gradient(var(--border), var(--border));
+    height: 100%; position: absolute;
+  }
+
+  .topo-teams-row {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px;
+  }
+  .topo-team {
+    border-radius: 16px; overflow: hidden;
+    border: 1px solid var(--border2);
+    transition: all .3s;
+  }
+  .topo-team:hover {
+    border-color: var(--border);
+    transform: translateY(-4px);
+    box-shadow: 0 16px 32px rgba(0,0,0,0.2);
+  }
+  .topo-team-header {
+    padding: 16px 20px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .topo-team.content .topo-team-header { background: rgba(99,179,237,0.08); }
+  .topo-team.dev .topo-team-header { background: rgba(159,122,234,0.08); }
+  .topo-team.research .topo-team-header { background: rgba(104,211,145,0.08); }
+  .topo-team-name { font-size: 15px; font-weight: 700; }
+  .topo-team.content .topo-team-name { color: var(--blue); }
+  .topo-team.dev .topo-team-name { color: var(--purple); }
+  .topo-team.research .topo-team-name { color: var(--green); }
+  .lead-tag { font-size: 10px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+  .content .lead-tag { background: rgba(99,179,237,0.1); color: var(--blue2); }
+  .dev .lead-tag { background: rgba(159,122,234,0.1); color: var(--purple2); }
+  .research .lead-tag { background: rgba(104,211,145,0.1); color: var(--green2); }
+
+  .topo-team-body { padding: 16px 20px; background: var(--surface); }
+  .topo-section { margin-bottom: 14px; }
+  .topo-section-label {
+    font-size: 10px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--text3); font-weight: 700; margin-bottom: 8px;
+  }
+  .agent-row { display: flex; flex-direction: column; gap: 6px; }
+  .agent-item {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; border-radius: 8px;
+    background: var(--bg3); font-size: 13px;
+  }
+  .agent-item .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .content .agent-item .dot { background: var(--blue); box-shadow: 0 0 6px var(--blue); }
+  .dev .agent-item .dot { background: var(--purple); box-shadow: 0 0 6px var(--purple); }
+  .research .agent-item .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .agent-item .agent-id { flex: 1; color: var(--text); }
+  .agent-item .agent-model { font-size: 10px; color: var(--text3); font-style: italic; }
+  .hermes-badge {
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: rgba(104,211,145,0.1); color: var(--green2);
+    border: 1px solid rgba(104,211,145,0.2); font-weight: 600;
+  }
+
+  /* ── MECHANISMS ── */
+  .mechanisms-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .mech-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 16px; overflow: hidden;
+    transition: all .3s;
+  }
+  .mech-card:hover { border-color: var(--border); transform: translateY(-2px); }
+  .mech-header {
+    padding: 20px 24px;
+    display: flex; align-items: center; gap: 14px;
+    border-bottom: 1px solid var(--border2);
+  }
+  .mech-icon {
+    width: 44px; height: 44px; border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; flex-shrink: 0;
+  }
+  .mech-card:nth-child(1) .mech-icon { background: rgba(99,179,237,0.1); border: 1px solid rgba(99,179,237,0.2); }
+  .mech-card:nth-child(2) .mech-icon { background: rgba(104,211,145,0.1); border: 1px solid rgba(104,211,145,0.2); }
+  .mech-card:nth-child(3) .mech-icon { background: rgba(159,122,234,0.1); border: 1px solid rgba(159,122,234,0.2); }
+  .mech-card:nth-child(4) .mech-icon { background: rgba(246,173,85,0.1); border: 1px solid rgba(246,173,85,0.2); }
+  .mech-title { font-size: 16px; font-weight: 700; }
+  .mech-num { margin-left: auto; font-size: 28px; font-weight: 800; opacity: .15; }
+  .mech-body { padding: 24px; }
+  .mech-flow {
+    display: flex; flex-direction: column; gap: 0;
+  }
+  .flow-item {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border2);
+  }
+  .flow-item:last-child { border: none; padding-bottom: 0; }
+  .flow-dot {
+    width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+    margin-top: 2px;
+  }
+  .mech-card:nth-child(1) .flow-dot { background: rgba(99,179,237,0.15); color: var(--blue); }
+  .mech-card:nth-child(2) .flow-dot { background: rgba(104,211,145,0.15); color: var(--green); }
+  .mech-card:nth-child(3) .flow-dot { background: rgba(159,122,234,0.15); color: var(--purple); }
+  .mech-card:nth-child(4) .flow-dot { background: rgba(246,173,85,0.15); color: var(--orange); }
+  .flow-text { font-size: 13px; line-height: 1.6; }
+  .flow-text strong { color: var(--text); display: block; margin-bottom: 2px; }
+  .flow-text span { color: var(--text2); }
+  .flow-code {
+    margin-top: 4px; font-family: 'Menlo', 'Monaco', monospace;
+    font-size: 11px; color: var(--cyan);
+    background: var(--bg3); padding: 4px 8px; border-radius: 4px;
+    border-left: 2px solid var(--cyan);
+  }
+
+  /* ── ROADMAP ── */
+  .roadmap { display: flex; flex-direction: column; gap: 0; }
+  .phase {
+    display: grid; grid-template-columns: 160px 32px 1fr;
+    gap: 0; align-items: stretch;
+    opacity: 0;
+    animation: fadeInLeft .6s ease forwards;
+  }
+  .phase:nth-child(1) { animation-delay: .1s; }
+  .phase:nth-child(2) { animation-delay: .2s; }
+  .phase:nth-child(3) { animation-delay: .3s; }
+  .phase:nth-child(4) { animation-delay: .4s; }
+
+  .phase-label {
+    padding: 24px 24px 24px 0;
+    display: flex; flex-direction: column; justify-content: flex-start;
+    align-items: flex-end;
+    border-right: 1px solid var(--border2);
+  }
+  .phase-name { font-size: 14px; font-weight: 700; margin-bottom: 4px; }
+  .phase-period { font-size: 12px; color: var(--text3); }
+
+  .phase-dot-col {
+    display: flex; flex-direction: column; align-items: center;
+  }
+  .phase-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 2px solid;
+    margin-top: 28px; flex-shrink: 0; position: relative; z-index: 1;
+  }
+  .phase-line {
+    flex: 1; width: 1px; background: var(--border2);
+    margin-bottom: -1px;
+  }
+  .phase:last-child .phase-line { display: none; }
+
+  .phase-content {
+    padding: 24px 0 24px 24px;
+  }
+  .phase-content h4 { font-size: 15px; font-weight: 700; margin-bottom: 12px; }
+  .task-list { display: flex; flex-direction: column; gap: 8px; }
+  .task-item {
+    display: flex; align-items: flex-start; gap: 10px;
+    font-size: 13px; color: var(--text2);
+  }
+  .task-item .check {
+    width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0;
+    border: 1px solid var(--border2); display: flex; align-items: center;
+    justify-content: center; font-size: 10px; margin-top: 1px;
+  }
+  .phase.p1 .phase-name, .phase.p1 .phase-content h4 { color: var(--blue); }
+  .phase.p1 .phase-dot { border-color: var(--blue); box-shadow: 0 0 8px rgba(99,179,237,0.4); background: var(--blue); }
+  .phase.p1 .task-item .check { background: rgba(99,179,237,0.1); border-color: rgba(99,179,237,0.3); color: var(--blue); }
+  .phase.p2 .phase-name, .phase.p2 .phase-content h4 { color: var(--purple); }
+  .phase.p2 .phase-dot { border-color: var(--purple); background: rgba(159,122,234,0.3); }
+  .phase.p3 .phase-name, .phase.p3 .phase-content h4 { color: var(--green); }
+  .phase.p3 .phase-dot { border-color: var(--green); background: rgba(104,211,145,0.3); }
+  .phase.p4 .phase-name, .phase.p4 .phase-content h4 { color: var(--orange); }
+  .phase.p4 .phase-dot { border-color: var(--orange); background: rgba(246,173,85,0.3); }
+
+  /* ── RISK ── */
+  .risk-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .risk-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 12px; padding: 20px;
+    transition: all .3s;
+  }
+  .risk-card:hover { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(0,0,0,.2); }
+  .risk-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .risk-level {
+    font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 4px;
+    text-transform: uppercase; letter-spacing: .05em;
+  }
+  .risk-level.high { background: rgba(252,129,129,0.15); color: var(--red); border: 1px solid rgba(252,129,129,0.2); }
+  .risk-level.med { background: rgba(246,173,85,0.15); color: var(--orange); border: 1px solid rgba(246,173,85,0.2); }
+  .risk-level.low { background: rgba(104,211,145,0.15); color: var(--green); border: 1px solid rgba(104,211,145,0.2); }
+  .risk-title { font-size: 14px; font-weight: 600; }
+  .risk-body { font-size: 13px; color: var(--text2); line-height: 1.6; }
+  .risk-solution {
+    margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--border2);
+    font-size: 12px; color: var(--blue); display: flex; gap: 6px;
+  }
+  .risk-solution::before { content: '→'; }
+
+  /* ── VALUE ── */
+  .value-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; }
+  .value-card {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    border-radius: 16px; padding: 28px;
+    position: relative; overflow: hidden;
+    transition: all .3s;
+  }
+  .value-card:hover { border-color: var(--border); transform: translateY(-3px); box-shadow: 0 16px 32px rgba(0,0,0,.2); }
+  .value-card::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  }
+  .value-card:nth-child(1)::before { background: linear-gradient(90deg, var(--blue), var(--cyan)); }
+  .value-card:nth-child(2)::before { background: linear-gradient(90deg, var(--purple), var(--pink)); }
+  .value-card:nth-child(3)::before { background: linear-gradient(90deg, var(--green), var(--cyan)); }
+  .value-card:nth-child(4)::before { background: linear-gradient(90deg, var(--orange), var(--red)); }
+  .value-icon { font-size: 28px; margin-bottom: 16px; }
+  .value-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+  .value-card p { font-size: 14px; color: var(--text2); line-height: 1.6; margin-bottom: 16px; }
+  .value-metrics { display: flex; flex-direction: column; gap: 8px; }
+  .metric-row { display: flex; align-items: center; gap: 10px; }
+  .metric-label { font-size: 12px; color: var(--text3); width: 120px; flex-shrink: 0; }
+  .metric-bar { flex: 1; height: 4px; background: var(--bg3); border-radius: 2px; overflow: hidden; }
+  .metric-fill {
+    height: 100%; border-radius: 2px;
+    animation: barGrow 1.5s ease .8s both;
+    transform-origin: left;
+  }
+  .metric-val { font-size: 12px; font-weight: 700; width: 36px; text-align: right; }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 1px solid var(--border2);
+    padding: 40px;
+    text-align: center;
+  }
+  .footer-inner { max-width: 600px; margin: 0 auto; }
+  .footer-logo { font-size: 20px; font-weight: 800; margin-bottom: 12px; }
+  .footer-desc { font-size: 14px; color: var(--text2); margin-bottom: 24px; }
+  .footer-meta { font-size: 12px; color: var(--text3); }
+  .footer-tags { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 20px; }
+  .footer-tag {
+    font-size: 11px; padding: 4px 12px; border-radius: 20px;
+    background: var(--surface); border: 1px solid var(--border2);
+    color: var(--text2);
+  }
+
+  /* ── KEYFRAMES ── */
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeInDown { from { opacity: 0; transform: translateY(-20px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+  @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+  @keyframes bounce { 0%, 100% { transform: translateX(-50%) translateY(0); } 50% { transform: translateX(-50%) translateY(-8px); } }
+  @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+  /* ── PARTICLES ── */
+  .particles {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    overflow: hidden;
+  }
+  .particle {
+    position: absolute; width: 2px; height: 2px;
+    border-radius: 50%; background: var(--blue);
+    opacity: 0; animation: particleFloat linear infinite;
+  }
+  @keyframes particleFloat {
+    0% { opacity: 0; transform: translateY(100vh) scale(0); }
+    10% { opacity: .4; }
+    90% { opacity: .2; }
+    100% { opacity: 0; transform: translateY(-20px) scale(1); }
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 900px) {
+    .problem-grid, .teams-row, .hermes-twins, .topo-teams-row { grid-template-columns: 1fr; }
+    .mechanisms-grid, .value-grid, .knowledge-row { grid-template-columns: 1fr; }
+    .cap-grid { grid-template-columns: 1fr; }
+    .loop-steps, .loop-bottom { grid-template-columns: 1fr 1fr; }
+    .nav-links { display: none; }
+    section { padding: 60px 20px; }
+  }
+
+  /* Scroll reveal */
+  .reveal { opacity: 0; transform: translateY(24px); transition: opacity .7s ease, transform .7s ease; }
+  .reveal.visible { opacity: 1; transform: translateY(0); }
+</style>
+</head>
+<body>
+
+<!-- Particles -->
+<div class="particles" id="particles"></div>
+
+<!-- Nav -->
+<nav>
+  <div class="nav-brand">
+    <div class="dot"></div>
+    OpenClaw × Hermes · 融合架构方案
+  </div>
+  <div class="nav-links">
+    <a href="#problem">问题分析</a>
+    <a href="#arch">总体架构</a>
+    <a href="#evolution">进化引擎</a>
+    <a href="#team">团队拓扑</a>
+    <a href="#roadmap">路线图</a>
+    <a href="#value">商业价值</a>
+  </div>
+  <span class="nav-badge">v1.0.0 · 2026-04-15</span>
+</nav>
+
+<!-- Hero -->
+<div class="hero">
+  <div class="grid-bg"></div>
+  <div class="hero-bg"></div>
+  <div class="hero-content">
+    <div class="hero-tag">商业级技术融合方案</div>
+    <h1>
+      <span class="oc">OpenClaw</span>
+      <span class="x">×</span>
+      <span class="hm">Hermes</span>
+    </h1>
+    <p class="hero-sub">
+      构建一个<strong>会自我进化的智能 Agent 团队</strong><br>
+      执行力 × 进化力 = 指数级增长的 AI 协作系统
+    </p>
+    <div class="hero-stats">
+      <div class="stat-item">
+        <div class="stat-num" data-target="83">0</div>
+        <div class="stat-label">任务失败率降低 %</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num purple" data-target="102">0</div>
+        <div class="stat-label">渠道接入数量</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num green" data-target="4">0</div>
+        <div class="stat-label">集成实施阶段</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-num" style="background:linear-gradient(135deg,var(--orange),var(--red));-webkit-background-clip:text;-webkit-text-fill-color:transparent" data-target="1">0</div>
+        <div class="stat-label">周内可落地</div>
+      </div>
+    </div>
+  </div>
+  <div class="hero-scroll">SCROLL</div>
+</div>
+
+<!-- Problem Section -->
+<section id="problem">
+  <div class="section-header reveal">
+    <div class="section-tag">问题陈述</div>
+    <h2>现有架构的三大根本局限</h2>
+    <p class="section-desc">OpenClaw 是优秀的生产编排框架，但存在系统性缺陷，这正是融合 Hermes 的核心动机</p>
+  </div>
+
+  <div class="problem-grid reveal">
+    <div class="problem-card">
+      <div class="problem-icon">🔄</div>
+      <h3>静态智能，无法自我进化</h3>
+      <p>AGENTS.md + Prompt 是静态文件。Agent 没有机制将运行时经验转化为持久化的行为改变。用户指出错误，会话结束后下次依然重蹈覆辙。</p>
+    </div>
+    <div class="problem-card">
+      <div class="problem-icon">🏝️</div>
+      <h3>信息孤岛，团队无法共享智慧</h3>
+      <p>各 Agent 记忆空间完全隔离（安全要求），但缺少「知识提炼→共享」的跨层机制。pub-chief 学到的内容规律，dev-lead 永远无法复用。</p>
+    </div>
+    <div class="problem-card">
+      <div class="problem-icon">🌫️</div>
+      <h3>研究能力薄弱，内容靠模型幻觉</h3>
+      <p>pub-write 在没有真实素材的情况下创作，内容脱离实际。OpenClaw 缺少深度研究工具链（Tavily、Firecrawl、浏览器自动化），而 Hermes 恰好完整实现了这些。</p>
+    </div>
+  </div>
+
+  <div style="margin-top:40px" class="reveal">
+    <div class="vs-grid">
+      <div class="vs-col bad">
+        <h3>❌ 静态 Agent 系统</h3>
+        <div class="vs-item"><span class="icon">—</span>静态 Prompt，每次重置</div>
+        <div class="vs-item"><span class="icon">—</span>失败即忘，重复犯错</div>
+        <div class="vs-item"><span class="icon">—</span>信息孤岛，无法共享</div>
+        <div class="vs-item"><span class="icon">—</span>研究靠幻觉，质量不稳</div>
+        <div class="vs-item"><span class="icon">—</span>手动维护能力，成本高</div>
+        <div class="vs-item"><span class="icon">—</span>新 Agent 从零开始</div>
+      </div>
+      <div class="vs-divider">VS</div>
+      <div class="vs-col good">
+        <h3>✅ OpenClaw × Hermes 融合</h3>
+        <div class="vs-item"><span class="icon">✦</span>技能动态进化，越用越准</div>
+        <div class="vs-item"><span class="icon">✦</span>失败驱动技能创建，自动改进</div>
+        <div class="vs-item"><span class="icon">✦</span>技能库共享，团队集体智慧</div>
+        <div class="vs-item"><span class="icon">✦</span>Tavily + Browser 真实素材</div>
+        <div class="vs-item"><span class="icon">✦</span>自动进化，零人工干预</div>
+        <div class="vs-item"><span class="icon">✦</span>新 Agent 继承全团队经验</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Capability Compare -->
+<section>
+  <div class="section-header reveal">
+    <div class="section-tag">能力解析</div>
+    <h2>两套系统能力互补矩阵</h2>
+    <p class="section-desc">OpenClaw 擅长生产调度，Hermes 擅长自我进化——两者天然互补</p>
+  </div>
+  <div class="cap-grid reveal">
+    <div class="cap-cell head">能力维度</div>
+    <div class="cap-cell head" style="color:var(--blue)">OpenClaw</div>
+    <div class="cap-cell head" style="color:var(--green)">Hermes</div>
+    <div class="cap-cell head" style="color:var(--purple)">融合后</div>
+
+    <div class="cap-cell label">多渠道接入</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:linear-gradient(90deg,var(--blue),var(--cyan))"></div></div><span class="bar-label" style="color:var(--blue)">102+</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:45%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--green)">23</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:linear-gradient(90deg,var(--purple),var(--blue))"></div></div><span class="bar-label" style="color:var(--purple)">102+</span></div></div>
+
+    <div class="cap-cell label">深度研究工具</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:15%;background:var(--blue)"></div></div><span class="bar-label" style="color:var(--text3)">弱</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:90%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--green)">强</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:90%;background:linear-gradient(90deg,var(--purple),var(--green))"></div></div><span class="bar-label" style="color:var(--purple)">强</span></div></div>
+
+    <div class="cap-cell label">技能自动进化</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:5%;background:var(--blue)"></div></div><span class="bar-label" style="color:var(--text3)">无</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--green)">✦</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:linear-gradient(90deg,var(--purple),var(--green))"></div></div><span class="bar-label" style="color:var(--purple)">✦</span></div></div>
+
+    <div class="cap-cell label">多 Agent 编排</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:85%;background:var(--blue)"></div></div><span class="bar-label" style="color:var(--blue)">强</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:40%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--text3)">中</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:linear-gradient(90deg,var(--purple),var(--blue))"></div></div><span class="bar-label" style="color:var(--purple)">✦</span></div></div>
+
+    <div class="cap-cell label">记忆系统</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:70%;background:var(--blue)"></div></div><span class="bar-label" style="color:var(--blue)">好</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:75%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--green)">好</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:95%;background:linear-gradient(90deg,var(--purple),var(--cyan))"></div></div><span class="bar-label" style="color:var(--purple)">✦</span></div></div>
+
+    <div class="cap-cell label">生产稳定性</div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:92%;background:var(--blue)"></div></div><span class="bar-label" style="color:var(--blue)">高</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:65%;background:var(--green)"></div></div><span class="bar-label" style="color:var(--text3)">中</span></div></div>
+    <div class="cap-cell"><div class="bar-wrap"><div class="bar"><div class="bar-fill" style="width:92%;background:linear-gradient(90deg,var(--purple),var(--blue))"></div></div><span class="bar-label" style="color:var(--purple)">高</span></div></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Architecture -->
+<section id="arch" class="section-full" style="padding:80px 40px;max-width:1200px;margin:0 auto">
+  <div class="section-header reveal">
+    <div class="section-tag">总体架构</div>
+    <h2>四层融合架构全景</h2>
+    <p class="section-desc">每一层职责清晰，通过 MCP stdio 桥接，保持两套系统各自的独立性与可维护性</p>
+  </div>
+
+  <div class="arch-wrap reveal">
+    <div class="arch-layers">
+
+      <!-- L0 -->
+      <div class="arch-layer l0">
+        <div class="layer-badge">L0 · 渠道接入层</div>
+        <div class="layer-title">用户与渠道接入 · OpenClaw 原生 · 102+ 渠道</div>
+        <div class="channel-row">
+          <span class="chip cyan">飞书 Feishu</span>
+          <span class="chip cyan">Telegram</span>
+          <span class="chip cyan">Discord</span>
+          <span class="chip cyan">WhatsApp</span>
+          <span class="chip cyan">Slack</span>
+          <span class="chip cyan">Signal</span>
+          <span class="chip cyan">iMessage</span>
+          <span class="chip cyan">CLI</span>
+          <span class="chip cyan">+ 95 更多</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:center;padding:8px 0">
+        <div style="width:1px;height:24px;background:linear-gradient(var(--border),transparent)"></div>
+      </div>
+
+      <!-- L1 -->
+      <div class="arch-layer l1">
+        <div class="layer-badge">L1 · 网关与路由层</div>
+        <div class="layer-title">OpenClaw Gateway · 消息路由 · Session 管理 · 权限控制</div>
+        <div class="channel-row">
+          <span class="chip blue">Binding Resolver</span>
+          <span class="chip blue">Session Key Gen</span>
+          <span class="chip blue">Lane Scheduler</span>
+          <span class="chip blue">Tool Policy</span>
+          <span class="chip blue">Auth & Scopes</span>
+          <span class="chip blue">多维路由 peer/guild/role</span>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:center;padding:8px 0">
+        <div style="width:1px;height:24px;background:linear-gradient(var(--border),transparent)"></div>
+      </div>
+
+      <!-- L2 -->
+      <div class="arch-layer l2">
+        <div class="layer-badge">L2 · 编排执行层</div>
+        <div class="l2-inner">
+          <div class="jarvis-box">
+            <div>
+              <div class="jarvis-label">JARVIS · 全局 Lead Orchestrator</div>
+              <div class="jarvis-desc">任务分解 · 路由到专业团队 · 综合结果 · 感知 Hermes 进化状态</div>
+            </div>
+            <div class="jarvis-model">
+              <span class="chip purple">claude-sonnet-4-6</span>
+            </div>
+          </div>
+          <div class="teams-row">
+            <div class="team-card">
+              <div class="team-card-name" style="color:var(--blue)">内容团队</div>
+              <div class="team-card-workers">
+                <span class="worker-chip">pub-chief (Lead)</span>
+                <span class="worker-chip">pub-topic · pub-write</span>
+                <span class="worker-chip">pub-score · pub-fact</span>
+              </div>
+            </div>
+            <div class="team-card">
+              <div class="team-card-name" style="color:var(--purple)">开发团队</div>
+              <div class="team-card-workers">
+                <span class="worker-chip">dev-lead (Lead)</span>
+                <span class="worker-chip">codex-builder</span>
+                <span class="worker-chip">dev-review</span>
+              </div>
+            </div>
+            <div class="team-card">
+              <div class="team-card-name" style="color:var(--green)">研究团队</div>
+              <div class="team-card-workers">
+                <span class="worker-chip">research-lead (Lead)</span>
+                <span class="worker-chip">res-web · res-deep</span>
+              </div>
+            </div>
+            <div class="team-card">
+              <div class="team-card-name" style="color:var(--orange)">进化管理</div>
+              <div class="team-card-workers">
+                <span class="worker-chip">skill-hub (同步)</span>
+                <span class="worker-chip">hermes-meta (元学习)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- MCP Bridge -->
+      <div class="mcp-bridge">
+        <div class="mcp-line"></div>
+        <div class="mcp-badge">⇅ MCP Bridge · stdio · 双向通信</div>
+        <div class="mcp-line"></div>
+      </div>
+
+      <!-- L3 -->
+      <div class="arch-layer l3">
+        <div class="layer-badge">L3 · 智能进化层</div>
+        <div class="hermes-twins">
+          <div class="twin-card">
+            <div class="twin-name">hermes-content</div>
+            <div class="twin-desc">内容策略进化 + 深度素材搜索，对应内容团队</div>
+            <div class="twin-tools">
+              <span class="twin-tool">Tavily</span>
+              <span class="twin-tool">Browser</span>
+              <span class="twin-tool">skill_manage</span>
+            </div>
+          </div>
+          <div class="twin-card">
+            <div class="twin-name">hermes-dev</div>
+            <div class="twin-desc">代码模式学习 + 错误分析进化，对应开发团队</div>
+            <div class="twin-tools">
+              <span class="twin-tool">Code Exec</span>
+              <span class="twin-tool">Web Search</span>
+              <span class="twin-tool">skill_manage</span>
+            </div>
+          </div>
+          <div class="twin-card">
+            <div class="twin-name">hermes-research</div>
+            <div class="twin-desc">研究方法进化 + 知识整合，对应研究团队</div>
+            <div class="twin-tools">
+              <span class="twin-tool">Firecrawl</span>
+              <span class="twin-tool">Tavily</span>
+              <span class="twin-tool">skill_manage</span>
+            </div>
+          </div>
+        </div>
+        <div class="meta-card">
+          <div>
+            <div class="meta-label">hermes-meta · 跨团队元学习</div>
+            <div class="meta-desc">分析跨域共性模式，提炼通用技能，推送到共享技能库</div>
+          </div>
+          <div class="core-engines">
+            <span class="engine-chip">skill_manager_tool</span>
+            <span class="engine-chip">on_delegation</span>
+            <span class="engine-chip">memory providers</span>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:center;padding:8px 0">
+        <div style="width:1px;height:24px;background:linear-gradient(var(--border),transparent)"></div>
+      </div>
+
+      <!-- L4 -->
+      <div class="arch-layer l4">
+        <div class="layer-badge">L4 · 知识持久层</div>
+        <div class="knowledge-row">
+          <div class="know-card">
+            <h4>技能库 · ~/.hermes/skills/</h4>
+            <p>Hermes 动态创建和进化的技能文件，按域分类（content/dev/research/shared），持续增长</p>
+          </div>
+          <div class="know-arrow">⇄</div>
+          <div class="know-card">
+            <h4>Agent 工作区 · workspace-*/skills/</h4>
+            <p>由 skill-hub 同步至各 OpenClaw Agent 工作区，Agent 读取最新进化技能执行任务</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Evolution Loop -->
+<section id="evolution">
+  <div class="section-header reveal">
+    <div class="section-tag">核心创新</div>
+    <h2>自我进化闭环引擎</h2>
+    <p class="section-desc">这是整个融合架构最核心的商业价值——每一次失败都变成一次技能迭代</p>
+  </div>
+
+  <div class="loop-wrap reveal">
+    <div class="loop-steps">
+      <div class="loop-step step-1">
+        <div class="step-num">①</div>
+        <h4 style="color:var(--blue)">任务执行</h4>
+        <p>OpenClaw 团队接收用户请求，Lead 分解并分发给 Workers 执行</p>
+      </div>
+      <div class="loop-step step-2">
+        <div class="step-num">②</div>
+        <h4 style="color:var(--purple)">结果评估</h4>
+        <p>检测失败、超时、用户否定反馈，触发进化条件阈值</p>
+      </div>
+      <div class="loop-step step-3">
+        <div class="step-num">③</div>
+        <h4 style="color:var(--green)">Hermes 分析</h4>
+        <p>Hermes Twin 深度研究根因，Tavily + Browser 合成改进方案</p>
+      </div>
+      <div class="loop-step step-4">
+        <div class="step-num">④</div>
+        <h4 style="color:var(--orange)">技能进化</h4>
+        <p>skill_manage 创建/更新技能，同步至 OpenClaw 工作区，下次执行即改善</p>
+      </div>
+    </div>
+
+    <div class="loop-bottom">
+      <div class="loop-detail">
+        <h5 style="color:var(--blue)">🎯 触发条件</h5>
+        <ul>
+          <li>工具调用连续失败 ≥ 3 次</li>
+          <li>用户反馈「不对」「重做」「差」</li>
+          <li>单任务耗时超过 5 分钟</li>
+          <li>质量评分低于 5.0 / 10</li>
+        </ul>
+      </div>
+      <div class="loop-detail">
+        <h5 style="color:var(--purple)">🔍 Hermes 研究</h5>
+        <ul>
+          <li>Tavily 搜索最新最佳实践</li>
+          <li>Browser 抓取参考案例</li>
+          <li>分析失败根因</li>
+          <li>合成结构化改进方案</li>
+        </ul>
+      </div>
+      <div class="loop-detail">
+        <h5 style="color:var(--green)">⚡ 技能操作</h5>
+        <ul>
+          <li>首次：skill_manage create</li>
+          <li>小修：skill_manage patch（模糊匹配）</li>
+          <li>重构：skill_manage edit</li>
+          <li>原子写入 + 安全扫描保障</li>
+        </ul>
+      </div>
+      <div class="loop-detail">
+        <h5 style="color:var(--orange)">📈 量化效果</h5>
+        <ul>
+          <li>首月：失败率降低 40%</li>
+          <li>三月：技能命中率 &gt; 60%</li>
+          <li>六月：命中率 &gt; 80%</li>
+          <li>持续：越用越强，无上限</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Team Topology -->
+<section id="team">
+  <div class="section-header reveal">
+    <div class="section-tag">团队拓扑</div>
+    <h2>Lead × Twin 双核团队结构</h2>
+    <p class="section-desc">每个 OpenClaw 域团队配备一个 Hermes Twin，Twin 是团队的「进化大脑」</p>
+  </div>
+
+  <div class="topo-wrap reveal">
+    <div class="topo-center">
+      <div class="jarvis-node">
+        <div class="name">JARVIS</div>
+        <div class="role">全局 Lead Orchestrator · 任务分解 · 路由 · 综合</div>
+        <div class="model-tag">claude-sonnet-4-6 · 常驻</div>
+      </div>
+    </div>
+
+    <div class="topo-teams-row">
+      <!-- Content Team -->
+      <div class="topo-team content">
+        <div class="topo-team-header">
+          <span class="topo-team-name">内容团队</span>
+          <span class="lead-tag">pub-chief Lead</span>
+        </div>
+        <div class="topo-team-body">
+          <div class="topo-section">
+            <div class="topo-section-label">OpenClaw Lead</div>
+            <div class="agent-row">
+              <div class="agent-item">
+                <div class="dot"></div>
+                <span class="agent-id">pub-chief</span>
+                <span class="agent-model">sonnet-4-6</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Hermes Twin</div>
+            <div class="agent-row">
+              <div class="agent-item" style="background:rgba(104,211,145,0.05);border:1px solid rgba(104,211,145,0.1)">
+                <div class="dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+                <span class="agent-id">hermes-content</span>
+                <span class="hermes-badge">进化</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Workers</div>
+            <div class="agent-row">
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">pub-topic</span><span class="agent-model">deepseek</span></div>
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">pub-write</span><span class="agent-model">doubao</span></div>
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">pub-score</span><span class="agent-model">deepseek</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dev Team -->
+      <div class="topo-team dev">
+        <div class="topo-team-header">
+          <span class="topo-team-name">开发团队</span>
+          <span class="lead-tag">dev-lead Lead</span>
+        </div>
+        <div class="topo-team-body">
+          <div class="topo-section">
+            <div class="topo-section-label">OpenClaw Lead</div>
+            <div class="agent-row">
+              <div class="agent-item">
+                <div class="dot"></div>
+                <span class="agent-id">dev-lead</span>
+                <span class="agent-model">sonnet-4-6</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Hermes Twin</div>
+            <div class="agent-row">
+              <div class="agent-item" style="background:rgba(104,211,145,0.05);border:1px solid rgba(104,211,145,0.1)">
+                <div class="dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+                <span class="agent-id">hermes-dev</span>
+                <span class="hermes-badge">进化</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Workers</div>
+            <div class="agent-row">
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">codex-builder</span><span class="agent-model">gpt-5.4</span></div>
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">dev-review</span><span class="agent-model">sonnet-4-6</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Research Team -->
+      <div class="topo-team research">
+        <div class="topo-team-header">
+          <span class="topo-team-name">研究团队</span>
+          <span class="lead-tag">research-lead Lead</span>
+        </div>
+        <div class="topo-team-body">
+          <div class="topo-section">
+            <div class="topo-section-label">OpenClaw Lead</div>
+            <div class="agent-row">
+              <div class="agent-item">
+                <div class="dot"></div>
+                <span class="agent-id">research-lead</span>
+                <span class="agent-model">sonnet-4-6</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Hermes Twin</div>
+            <div class="agent-row">
+              <div class="agent-item" style="background:rgba(104,211,145,0.05);border:1px solid rgba(104,211,145,0.1)">
+                <div class="dot" style="background:var(--green);box-shadow:0 0 6px var(--green)"></div>
+                <span class="agent-id">hermes-research</span>
+                <span class="hermes-badge">进化</span>
+              </div>
+            </div>
+          </div>
+          <div class="topo-section">
+            <div class="topo-section-label">Workers</div>
+            <div class="agent-row">
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">res-web</span><span class="agent-model">deepseek</span></div>
+              <div class="agent-item"><div class="dot"></div><span class="agent-id">res-deep</span><span class="agent-model">Hermes delegate</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Mechanisms -->
+<section>
+  <div class="section-header reveal">
+    <div class="section-tag">集成机制</div>
+    <h2>四大核心集成机制</h2>
+    <p class="section-desc">从管道通信到记忆统一，每个机制都有明确的技术边界和落地方式</p>
+  </div>
+  <div class="mechanisms-grid reveal">
+    <div class="mech-card">
+      <div class="mech-header">
+        <div class="mech-icon">🔌</div>
+        <div>
+          <div class="mech-title">MCP 双向桥接</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">今天可落地 · stdio 传输 · 零网络配置</div>
+        </div>
+        <div class="mech-num">01</div>
+      </div>
+      <div class="mech-body">
+        <div class="mech-flow">
+          <div class="flow-item">
+            <div class="flow-dot">A</div>
+            <div class="flow-text">
+              <strong>OpenClaw → Hermes</strong>
+              <span>注册 hermes MCP server，获得 10 个工具</span>
+              <div class="flow-code">hermes:messages_send(channel, msg)</div>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">B</div>
+            <div class="flow-text">
+              <strong>Hermes → OpenClaw</strong>
+              <span>openclaw_mcp_server.py 反向暴露接口</span>
+              <div class="flow-code">openclaw:send_to_agent(agentId, task)</div>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">✓</div>
+            <div class="flow-text">
+              <strong>降级保障</strong>
+              <span>Hermes 故障时 OpenClaw 独立运行，无功能中断</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mech-card">
+      <div class="mech-header">
+        <div class="mech-icon">🧬</div>
+        <div>
+          <div class="mech-title">自我进化闭环</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">核心创新 · 失败驱动 · 持续改进</div>
+        </div>
+        <div class="mech-num">02</div>
+      </div>
+      <div class="mech-body">
+        <div class="mech-flow">
+          <div class="flow-item">
+            <div class="flow-dot">1</div>
+            <div class="flow-text">
+              <strong>失败检测 → 通知 Twin</strong>
+              <span>Lead 检测阈值，发送结构化失败上报</span>
+              <div class="flow-code">[EVOLUTION_REQUEST] { task, reason }</div>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">2</div>
+            <div class="flow-text">
+              <strong>Hermes 研究 → 技能创建</strong>
+              <span>Tavily 搜索 + 根因分析 + skill_manage patch</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">3</div>
+            <div class="flow-text">
+              <strong>同步部署 → 下次改善</strong>
+              <span>skill-hub 自动同步，Agent 读取进化后技能</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mech-card">
+      <div class="mech-header">
+        <div class="mech-icon">🗂️</div>
+        <div>
+          <div class="mech-title">技能同步通道</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">agentskills.io 兼容 · 格式天然互通</div>
+        </div>
+        <div class="mech-num">03</div>
+      </div>
+      <div class="mech-body">
+        <div class="mech-flow">
+          <div class="flow-item">
+            <div class="flow-dot">→</div>
+            <div class="flow-text">
+              <strong>content/ 技能</strong>
+              <span>同步至 workspace-pub-chief/skills/</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">→</div>
+            <div class="flow-text">
+              <strong>dev/ 技能</strong>
+              <span>同步至 workspace-dev-lead/skills/</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">→</div>
+            <div class="flow-text">
+              <strong>shared/ 通用技能</strong>
+              <span>同步至所有 workspace/skills/shared/</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mech-card">
+      <div class="mech-header">
+        <div class="mech-icon">🧠</div>
+        <div>
+          <div class="mech-title">记忆系统统一桥接</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:2px">四层隔离规则 · 防污染 · 选择性同步</div>
+        </div>
+        <div class="mech-num">04</div>
+      </div>
+      <div class="mech-body">
+        <div class="mech-flow">
+          <div class="flow-item">
+            <div class="flow-dot">L0</div>
+            <div class="flow-text">
+              <strong>用户级记忆 · 只读共享</strong>
+              <span>MemPalace 全局 Drawer ↔ Hermes USER.md</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">L2</div>
+            <div class="flow-text">
+              <strong>Agent 私有记忆 · 永不桥接</strong>
+              <span>完全隔离，上次已修复的配置层保证</span>
+            </div>
+          </div>
+          <div class="flow-item">
+            <div class="flow-dot">L3</div>
+            <div class="flow-text">
+              <strong>技能记忆 · 双向同步</strong>
+              <span>Hermes 创建 → skill-hub → OpenClaw 部署</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Roadmap -->
+<section id="roadmap">
+  <div class="section-header reveal">
+    <div class="section-tag">实施路线图</div>
+    <h2>四阶段落地计划</h2>
+    <p class="section-desc">从 MCP 管道到持续进化，每个阶段都有明确的验收标准</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:40px;align-items:start" class="reveal">
+    <div class="roadmap">
+      <div class="phase p1">
+        <div class="phase-label">
+          <div class="phase-name">Phase 1</div>
+          <div class="phase-period">Day 1–3</div>
+        </div>
+        <div class="phase-dot-col">
+          <div class="phase-dot"></div>
+          <div class="phase-line"></div>
+        </div>
+        <div class="phase-content">
+          <h4>打通 MCP 管道</h4>
+          <div class="task-list">
+            <div class="task-item"><span class="check">✓</span><span>注册 Hermes MCP server 到 openclaw.json</span></div>
+            <div class="task-item"><span class="check">✓</span><span>验证 10 个 hermes 工具可见</span></div>
+            <div class="task-item"><span class="check">✓</span><span>编写 openclaw_mcp_server.py 反向桥接</span></div>
+            <div class="task-item"><span class="check">✓</span><span>端到端测试双向通信</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="phase p2">
+        <div class="phase-label">
+          <div class="phase-name">Phase 2</div>
+          <div class="phase-period">Day 4–10</div>
+        </div>
+        <div class="phase-dot-col">
+          <div class="phase-dot"></div>
+          <div class="phase-line"></div>
+        </div>
+        <div class="phase-content">
+          <h4>建立团队结构</h4>
+          <div class="task-list">
+            <div class="task-item"><span class="check" style="border-color:rgba(159,122,234,.3)"></span><span>创建三个 Hermes Twin agent 配置</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(159,122,234,.3)"></span><span>升级 Jarvis AGENTS.md，添加路由规则</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(159,122,234,.3)"></span><span>创建 skill-hub agent 和同步脚本</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(159,122,234,.3)"></span><span>配置每日自动技能同步 cron</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="roadmap">
+      <div class="phase p3">
+        <div class="phase-label">
+          <div class="phase-name">Phase 3</div>
+          <div class="phase-period">Day 11–20</div>
+        </div>
+        <div class="phase-dot-col">
+          <div class="phase-dot"></div>
+          <div class="phase-line"></div>
+        </div>
+        <div class="phase-content">
+          <h4>激活进化闭环</h4>
+          <div class="task-list">
+            <div class="task-item"><span class="check" style="border-color:rgba(104,211,145,.3)"></span><span>Lead Agent 添加失败检测与上报逻辑</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(104,211,145,.3)"></span><span>配置 on_delegation 学习钩子</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(104,211,145,.3)"></span><span>实现 MemPalace ↔ Hermes 记忆桥接</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(104,211,145,.3)"></span><span>模拟 10 个失败场景验证闭环</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="phase p4">
+        <div class="phase-label">
+          <div class="phase-name">Phase 4</div>
+          <div class="phase-period">Day 21+</div>
+        </div>
+        <div class="phase-dot-col">
+          <div class="phase-dot"></div>
+        </div>
+        <div class="phase-content">
+          <h4>持续进化运营</h4>
+          <div class="task-list">
+            <div class="task-item"><span class="check" style="border-color:rgba(246,173,85,.3)"></span><span>技能版本化管理与质量追踪</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(246,173,85,.3)"></span><span>hermes-meta 跨团队元学习配置</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(246,173,85,.3)"></span><span>全链路可观测性仪表盘</span></div>
+            <div class="task-item"><span class="check" style="border-color:rgba(246,173,85,.3)"></span><span>商业化部署与监控体系</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Risk -->
+<section>
+  <div class="section-header reveal">
+    <div class="section-tag">风险矩阵</div>
+    <h2>风险识别与应对策略</h2>
+    <p class="section-desc">已识别所有主要风险并设计降级方案，Hermes 是增强层而非依赖层</p>
+  </div>
+  <div class="risk-grid reveal">
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level med">中风险</span>
+        <span class="risk-title">MCP 进程启动失败</span>
+      </div>
+      <div class="risk-body">Hermes MCP server 依赖 Python venv，PATH 问题可能导致无法启动</div>
+      <div class="risk-solution">使用 bash wrapper + venv activate 确保环境隔离，保持长进程不重启</div>
+    </div>
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level high">高风险</span>
+        <span class="risk-title">技能质量低下</span>
+      </div>
+      <div class="risk-body">Hermes 自动创建的技能可能包含错误步骤或安全隐患</div>
+      <div class="risk-solution">安全扫描已内置（skills_guard），额外配置人工审批通道，支持版本回滚</div>
+    </div>
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level med">中风险</span>
+        <span class="risk-title">技能命名冲突</span>
+      </div>
+      <div class="risk-body">不同域的技能同步到同一 workspace 可能产生命名碰撞</div>
+      <div class="risk-solution">强制使用域前缀命名（content-*、dev-*），skill-hub 检测冲突后跳过</div>
+    </div>
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level low">低风险</span>
+        <span class="risk-title">记忆跨 Agent 污染</span>
+      </div>
+      <div class="risk-body">桥接脚本可能错误同步 Agent 私有记忆</div>
+      <div class="risk-solution">只桥接 L3 技能层，L2 私有记忆永不参与同步，MemPalace 隔离配置已验证</div>
+    </div>
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level med">中风险</span>
+        <span class="risk-title">Token 成本失控</span>
+      </div>
+      <div class="risk-body">频繁触发 Hermes 研究和进化会消耗大量 token</div>
+      <div class="risk-solution">每任务成本上限配置，技能命中时跳过研究（预期六月后命中率 &gt;80%）</div>
+    </div>
+    <div class="risk-card">
+      <div class="risk-header">
+        <span class="risk-level low">低风险</span>
+        <span class="risk-title">主系统功能中断</span>
+      </div>
+      <div class="risk-body">Hermes 完全故障时可能影响 OpenClaw 任务执行</div>
+      <div class="risk-solution">Hermes 是增强层而非依赖层。所有 MCP 调用包裹 try/catch，降级为纯 OpenClaw 运行</div>
+    </div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<!-- Value -->
+<section id="value">
+  <div class="section-header reveal">
+    <div class="section-tag">商业价值</div>
+    <h2>四大商业应用场景</h2>
+    <p class="section-desc">从内容创作到企业知识管理，自我进化能力带来的商业差异化</p>
+  </div>
+  <div class="value-grid reveal">
+    <div class="value-card">
+      <div class="value-icon">📝</div>
+      <h3>内容创作团队</h3>
+      <p>自媒体运营（公众号/抖音/小红书），每天产出高质量内容。Hermes 确保每篇文章都有真实素材支撑，内容规律随时间精准积累。</p>
+      <div class="value-metrics">
+        <div class="metric-row">
+          <span class="metric-label">内容真实性</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:90%;background:linear-gradient(90deg,var(--blue),var(--cyan))"></div></div>
+          <span class="metric-val" style="color:var(--blue)">↑90%</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">人工修改次数</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:20%;background:var(--green)"></div></div>
+          <span class="metric-val" style="color:var(--green)">↓80%</span>
+        </div>
+      </div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">🏢</div>
+      <h3>企业知识助手</h3>
+      <p>企业内部 AI 助手，多渠道接入（飞书/Slack/钉钉）。随员工使用，系统自动积累企业专有知识，新员工无需人工传授即可获取历史经验。</p>
+      <div class="value-metrics">
+        <div class="metric-row">
+          <span class="metric-label">知识积累速度</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:85%;background:linear-gradient(90deg,var(--purple),var(--pink))"></div></div>
+          <span class="metric-val" style="color:var(--purple)">10x</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">上手周期</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:30%;background:var(--orange)"></div></div>
+          <span class="metric-val" style="color:var(--orange)">↓70%</span>
+        </div>
+      </div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">💻</div>
+      <h3>AI 软件开发团队</h3>
+      <p>多语言、多框架代码生成和审查。Hermes 代码模式库随项目积累，减少重复代码错误，提升开发效率，最佳实践自动传播到整个团队。</p>
+      <div class="value-metrics">
+        <div class="metric-row">
+          <span class="metric-label">代码错误重复率</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:15%;background:linear-gradient(90deg,var(--green),var(--cyan))"></div></div>
+          <span class="metric-val" style="color:var(--green)">↓85%</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">开发效率</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:75%;background:var(--cyan)"></div></div>
+          <span class="metric-val" style="color:var(--cyan)">↑3x</span>
+        </div>
+      </div>
+    </div>
+    <div class="value-card">
+      <div class="value-icon">🔬</div>
+      <h3>研究分析平台</h3>
+      <p>深度行业研究报告自动生成，Hermes 研究能力 + OpenClaw 多渠道分发。研究方法不断进化，报告质量持续提升，调研周期大幅缩短。</p>
+      <div class="value-metrics">
+        <div class="metric-row">
+          <span class="metric-label">调研周期</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:25%;background:linear-gradient(90deg,var(--orange),var(--red))"></div></div>
+          <span class="metric-val" style="color:var(--orange)">↓75%</span>
+        </div>
+        <div class="metric-row">
+          <span class="metric-label">信息覆盖度</span>
+          <div class="metric-bar"><div class="metric-fill" style="width:88%;background:var(--red)"></div></div>
+          <span class="metric-val" style="color:var(--red)">↑5x</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer>
+  <div class="footer-inner">
+    <div class="footer-logo">
+      <span style="color:var(--blue)">OpenClaw</span>
+      <span style="color:var(--text3)"> × </span>
+      <span style="color:var(--purple)">Hermes</span>
+    </div>
+    <div class="footer-desc">执行力 × 进化力 = 指数级增长的智能 Agent 团队系统</div>
+    <div class="footer-tags">
+      <span class="footer-tag">MCP Bridge</span>
+      <span class="footer-tag">Self-Evolving Skills</span>
+      <span class="footer-tag">Multi-Agent Orchestration</span>
+      <span class="footer-tag">102+ Channels</span>
+      <span class="footer-tag">MemPalace</span>
+      <span class="footer-tag">agentskills.io</span>
+    </div>
+    <div class="footer-meta">v1.0.0 · 2026-04-15 · 商业级技术融合方案</div>
+  </div>
+</footer>
+
+<script>
+// Particles
+const pc = document.getElementById('particles');
+for (let i = 0; i < 25; i++) {
+  const p = document.createElement('div');
+  p.className = 'particle';
+  p.style.cssText = `
+    left: ${Math.random()*100}%;
+    animation-duration: ${8+Math.random()*12}s;
+    animation-delay: ${Math.random()*10}s;
+    background: ${['#63b3ed','#9f7aea','#68d391','#76e4f7'][Math.floor(Math.random()*4)]};
+    width: ${1+Math.random()*2}px;
+    height: ${1+Math.random()*2}px;
+  `;
+  pc.appendChild(p);
+}
+
+// Counter animation
+const counters = document.querySelectorAll('.stat-num[data-target]');
+const animateCounter = (el) => {
+  const target = parseInt(el.dataset.target);
+  const dur = 1800;
+  const start = performance.now();
+  const tick = (now) => {
+    const p = Math.min((now-start)/dur, 1);
+    const ease = 1 - Math.pow(1-p, 3);
+    el.textContent = Math.round(ease * target);
+    if (p < 1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+};
+
+// Scroll reveal
+const reveals = document.querySelectorAll('.reveal');
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      e.target.classList.add('visible');
+      // Trigger counters if in hero
+    }
+  });
+}, { threshold: 0.1 });
+reveals.forEach(r => observer.observe(r));
+
+// Hero counters on load
+setTimeout(() => {
+  counters.forEach(animateCounter);
+}, 300);
+
+// Smooth active nav
+const sections = document.querySelectorAll('section[id]');
+const navLinks = document.querySelectorAll('.nav-links a');
+window.addEventListener('scroll', () => {
+  let cur = '';
+  sections.forEach(s => {
+    if (window.scrollY >= s.offsetTop - 100) cur = s.id;
+  });
+  navLinks.forEach(a => {
+    a.style.color = a.getAttribute('href') === '#'+cur ? 'var(--blue)' : '';
+  });
+});
+</script>
+</body>
+</html>

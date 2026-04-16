@@ -536,6 +536,12 @@ importers:
         specifier: workspace:*
         version: link:../..
 
+  extensions/mempalace-memory:
+    devDependencies:
+      openclaw:
+        specifier: workspace:*
+        version: link:../..
+
   extensions/microsoft:
     dependencies:
       node-edge-tts:
